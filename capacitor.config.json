@@ -2,6 +2,15 @@
   "appId": "com.lifesheet.app",
   "appName": "Life Sheet",
   "webDir": "www",
+  "server": {
+    "url": "https://nizerj.github.io/character_sheet/",
+    "cleartext": false,
+    "allowNavigation": [
+      "nizerj.github.io",
+      "accounts.google.com",
+      "drive.google.com"
+    ]
+  },
   "android": {
     "backgroundColor": "#070709"
   }

@@ -785,8 +785,12 @@ function bindEvents() {
 }
 
 // =========================================================================
-// STARTUP
+// STARTUP + SERVICE WORKER (OFFLINE CACHE & LIVE UPDATES)
 // =========================================================================
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
 bindEvents();
 const decayEvents = runAutoDecayCheck(state);
 renderApp(state, activeTrackerTab);
