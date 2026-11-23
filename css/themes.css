@@ -1,0 +1,164 @@
+/* ==========================================================================
+   PERSONA-INSPIRED MODERN EDGY THEMES
+   1. p5-velvet    (Default: Blue-Purple, Silver, Gold + Sharp Cut-In Edge)
+   2. p5-phantom   (P5: Crimson Red, Jet Black, Stark White & Gold Details)
+   3. p3-reload    (P3R: Midnight Navy, Electric Cyan, Crisp White Diagonals)
+   4. p4-gold      (P4: Dark Charcoal-Obsidian, Electric Persona Gold)
+   5. emerald-edge (Amazon Emerald, Amethyst & Gold with Sharp Modern Edge)
+   ========================================================================== */
+
+:root,
+[data-theme="p5-velvet"] {
+  --bg-page: radial-gradient(circle at 82% 14%, rgba(124, 58, 237, 0.22) 0%, transparent 42%),
+             linear-gradient(135deg, #070711 0%, #0f0d24 52%, #080914 100%);
+  --bg-solid: #080914;
+  --bg-card: #111226;
+  --bg-card-elevated: #171833;
+  --bg-input: #0a0b17;
+
+  --border-subtle: rgba(203, 213, 225, 0.18);
+  --border-strong: #cbd5e1;
+  --hard-shadow: 5px 5px 0px rgba(99, 102, 241, 0.35);
+
+  --accent-primary: #7c6df7;
+  --accent-primary-dim: rgba(124, 109, 247, 0.18);
+  --accent-gold: #f5c542;
+  --accent-gold-dim: rgba(245, 197, 66, 0.16);
+  --accent-silver: #e2e8f0;
+  --accent-emerald: #34d399;
+  --accent-danger: #ff3b5c;
+  --accent-danger-bg: rgba(255, 59, 92, 0.16);
+
+  --radar-stroke: #a5b4fc;
+  --radar-fill: rgba(124, 109, 247, 0.32);
+  --radar-grid: rgba(203, 213, 225, 0.25);
+
+  --text-bright: #ffffff;
+  --text-main: #e2e8f0;
+  --text-muted: #94a3b8;
+  --stripe-color: rgba(124, 109, 247, 0.07);
+}
+
+[data-theme="p5-phantom"] {
+  --bg-page: radial-gradient(circle at 86% 12%, rgba(230, 0, 18, 0.30) 0%, transparent 44%),
+             linear-gradient(135deg, #050507 0%, #160508 50%, #070709 100%);
+  --bg-solid: #070709;
+  --bg-card: #111014;
+  --bg-card-elevated: #19171e;
+  --bg-input: #09090c;
+
+  --border-subtle: rgba(255, 255, 255, 0.16);
+  --border-strong: #ff1e38;
+  --hard-shadow: 5px 5px 0px rgba(230, 0, 18, 0.55);
+
+  --accent-primary: #ff1e38;
+  --accent-primary-dim: rgba(255, 30, 56, 0.22);
+  --accent-gold: #f5c542;
+  --accent-gold-dim: rgba(245, 197, 66, 0.18);
+  --accent-silver: #f8fafc;
+  --accent-emerald: #34d399;
+  --accent-danger: #ff3b5c;
+  --accent-danger-bg: rgba(230, 0, 18, 0.22);
+
+  --radar-stroke: #ff1e38;
+  --radar-fill: rgba(230, 0, 18, 0.34);
+  --radar-grid: rgba(245, 197, 66, 0.28);
+
+  --text-bright: #ffffff;
+  --text-main: #f1f5f9;
+  --text-muted: #a1a1aa;
+  --stripe-color: rgba(230, 0, 18, 0.08);
+}
+
+[data-theme="p3-reload"] {
+  --bg-page: radial-gradient(circle at 85% 15%, rgba(56, 189, 248, 0.22) 0%, transparent 45%),
+             linear-gradient(135deg, #040914 0%, #09172e 55%, #050c1a 100%);
+  --bg-solid: #050c1a;
+  --bg-card: #0b182e;
+  --bg-card-elevated: #10213d;
+  --bg-input: #060f1f;
+
+  --border-subtle: rgba(125, 211, 252, 0.2);
+  --border-strong: #38bdf8;
+  --hard-shadow: 5px 5px 0px rgba(56, 189, 248, 0.28);
+
+  --accent-primary: #38bdf8;
+  --accent-primary-dim: rgba(56, 189, 248, 0.18);
+  --accent-gold: #f8fafc;
+  --accent-gold-dim: rgba(248, 250, 252, 0.14);
+  --accent-silver: #bae6fd;
+  --accent-emerald: #2dd4bf;
+  --accent-danger: #fb7185;
+  --accent-danger-bg: rgba(251, 113, 133, 0.16);
+
+  --radar-stroke: #38bdf8;
+  --radar-fill: rgba(56, 189, 248, 0.28);
+  --radar-grid: rgba(186, 230, 253, 0.24);
+
+  --text-bright: #ffffff;
+  --text-main: #e0f2fe;
+  --text-muted: #7dd3fc;
+  --stripe-color: rgba(56, 189, 248, 0.06);
+}
+
+[data-theme="p4-gold"] {
+  --bg-page: radial-gradient(circle at 85% 15%, rgba(250, 204, 21, 0.16) 0%, transparent 40%),
+             linear-gradient(135deg, #0a0a0c 0%, #151412 55%, #0c0c0e 100%);
+  --bg-solid: #0b0b0d;
+  --bg-card: #141417;
+  --bg-card-elevated: #1c1b20;
+  --bg-input: #0c0c0f;
+
+  --border-subtle: rgba(250, 204, 21, 0.22);
+  --border-strong: #facc15;
+  --hard-shadow: 5px 5px 0px rgba(250, 204, 21, 0.32);
+
+  --accent-primary: #facc15;
+  --accent-primary-dim: rgba(250, 204, 21, 0.18);
+  --accent-gold: #fde047;
+  --accent-gold-dim: rgba(253, 224, 71, 0.18);
+  --accent-silver: #f4f4f5;
+  --accent-emerald: #4ade80;
+  --accent-danger: #f43f5e;
+  --accent-danger-bg: rgba(244, 63, 94, 0.18);
+
+  --radar-stroke: #facc15;
+  --radar-fill: rgba(250, 204, 21, 0.24);
+  --radar-grid: rgba(244, 244, 245, 0.22);
+
+  --text-bright: #ffffff;
+  --text-main: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --stripe-color: rgba(250, 204, 21, 0.05);
+}
+
+[data-theme="emerald-edge"] {
+  --bg-page: radial-gradient(circle at 80% 15%, rgba(16, 185, 129, 0.2) 0%, transparent 42%),
+             linear-gradient(135deg, #05110d 0%, #0b221a 50%, #090a17 100%);
+  --bg-solid: #06130f;
+  --bg-card: #0c1f19;
+  --bg-card-elevated: #122b23;
+  --bg-input: #071410;
+
+  --border-subtle: rgba(110, 231, 183, 0.2);
+  --border-strong: #34d399;
+  --hard-shadow: 5px 5px 0px rgba(167, 139, 250, 0.3);
+
+  --accent-primary: #a78bfa;
+  --accent-primary-dim: rgba(167, 139, 250, 0.18);
+  --accent-gold: #f5c542;
+  --accent-gold-dim: rgba(245, 197, 66, 0.16);
+  --accent-silver: #d1fae5;
+  --accent-emerald: #34d399;
+  --accent-danger: #ff4769;
+  --accent-danger-bg: rgba(255, 71, 105, 0.16);
+
+  --radar-stroke: #34d399;
+  --radar-fill: rgba(167, 139, 250, 0.28);
+  --radar-grid: rgba(110, 231, 183, 0.24);
+
+  --text-bright: #f5fffb;
+  --text-main: #dcfce7;
+  --text-muted: #86b3a1;
+  --stripe-color: rgba(52, 211, 153, 0.05);
+}

@@ -1,0 +1,8 @@
+{
+  "appId": "com.lifesheet.app",
+  "appName": "Life Sheet",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#070709"
+  }
+}

@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="p5-velvet">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STATUS — Character Sheet</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./css/themes.css" />
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div class="bg-geometry" aria-hidden="true"></div>
+  <div class="bg-slash" aria-hidden="true"></div>
+
+  <div class="app-container">
+    <!-- PERSONA-STYLE TOP BAR -->
+    <header class="topbar">
+      <div class="calendar-corner">
+        <div class="date-block">
+          <span class="date-num" id="cal-date">11/22</span>
+          <span class="date-day" id="cal-day">SUN</span>
+        </div>
+        <nav class="page-nav" aria-label="Main views">
+          <button class="page-nav-btn active" data-page="status"><span>STATUS</span></button>
+          <button class="page-nav-btn" data-page="config"><span>CONFIG</span></button>
+        </nav>
+      </div>
+
+      <div class="level-hud">
+        <div class="lvl-ribbon"><span id="hud-level">LV.1</span></div>
+        <div class="xp-track-wrap">
+          <div class="xp-meta">
+            <span id="hud-title">Fool</span>
+            <span id="hud-xp-text">0 / 160 XP</span>
+          </div>
+          <div class="xp-track">
+            <div class="xp-fill" id="hud-xp-fill" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="btn btn-primary" id="btn-open-task">+ New Task</button>
+        <button class="btn btn-danger" id="btn-open-penalty">− Setback</button>
+        <button class="btn" id="btn-open-tutorial" title="Tutorial & Guide">?</button>
+      </div>
+    </header>
+
+    <!-- MAIN 3-COLUMN DASHBOARD (STATUS PAGE) -->
+    <main class="dashboard-grid" id="view-status">
+      <!-- LEFT COLUMN: PROFILE & STATUS -->
+      <section class="column">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Profile</span>
+            <button class="btn btn-sm" id="btn-open-profile">✎ Edit</button>
+          </div>
+
+          <div class="profile-hero">
+            <div class="avatar-container" id="avatar-container" title="Click to upload your photo">
+              <div id="avatar-content" style="width:100%;height:100%;"></div>
+              <div class="avatar-overlay">Change<br/>Photo</div>
+            </div>
+            <div style="min-width:0;flex:1;">
+              <div class="char-name" id="char-name">New Player</div>
+              <div class="char-class" id="char-class">Fool</div>
+              <div class="overall-rank-row" id="overall-rank"><span>AVG RANK 1.0 / 5</span></div>
+            </div>
+          </div>
+
+          <div class="vitals-grid">
+            <div class="vital-box">
+              <div class="vital-label">Age</div>
+              <div class="vital-value" id="vital-age">—</div>
+            </div>
+            <div class="vital-box">
+              <div class="vital-label">Height</div>
+              <div class="vital-value" id="vital-height">—</div>
+            </div>
+            <div class="vital-box">
+              <div class="vital-label">Weight</div>
+              <div class="vital-value" id="vital-weight">—</div>
+            </div>
+          </div>
+
+          <div class="goal-banner">
+            <div class="goal-kicker">Main Goal</div>
+            <div class="goal-text" id="char-goal">Set your main goal in Edit Profile.</div>
+          </div>
+
+          <div class="bmi-card" id="bmi-card">
+            <div class="bmi-header">
+              <span id="bmi-value">BMI —</span>
+              <span id="bmi-badge" style="color:var(--accent-gold);">MAX FITNESS: RANK 5</span>
+            </div>
+            <div class="bmi-desc" id="bmi-desc">Add height &amp; weight to calibrate your scientific Fitness Rank 5 cap.</div>
+          </div>
+
+          <div class="card-header" style="margin-top:4px;margin-bottom:10px;">
+            <span class="card-title" style="font-size:11px;">Status &amp; Decay</span>
+          </div>
+          <div class="status-list" id="status-list"></div>
+        </div>
+      </section>
+
+      <!-- CENTER COLUMN: PERSONA RADAR & SKILLS -->
+      <section class="column">
+        <div class="card card-primary">
+          <div class="card-header">
+            <span class="card-title">Social Stats</span>
+            <span style="font-size:11px;color:var(--text-muted);font-family:monospace;font-weight:700;">RANK 1 → 5</span>
+          </div>
+          <div class="radar-wrapper" id="radar-container"></div>
+          <div class="abilities-strip" id="abilities-strip"></div>
+        </div>
+
+        <div class="card card-silver">
+          <div class="card-header">
+            <span class="card-title">Skills</span>
+            <div class="skill-controls">
+              <div class="toggle-pill" role="group" aria-label="Skill mastery display">
+                <button id="btn-mode-moons" class="active">☽ Moons</button>
+                <button id="btn-mode-stars">★ Stars</button>
+              </div>
+              <button class="btn btn-sm btn-gold" id="btn-open-skill">+ Skill</button>
+            </div>
+          </div>
+          <div class="skills-list" id="skills-list"></div>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: TASK TRACKER (TODAY / WEEK / RECURRING / LOG) -->
+      <section class="column column-right">
+        <div class="card card-danger">
+          <div class="card-header">
+            <span class="card-title">Tasks &amp; Schedule</span>
+            <button class="btn btn-sm btn-primary" id="btn-quick-task">+ Add</button>
+          </div>
+
+          <div class="tracker-tabs">
+            <button class="tracker-tab active" data-tracker-tab="today">Today</button>
+            <button class="tracker-tab" data-tracker-tab="week">Week</button>
+            <button class="tracker-tab" data-tracker-tab="recurring">Recurring</button>
+            <button class="tracker-tab" data-tracker-tab="log">Log</button>
+          </div>
+
+          <div class="task-list" id="task-list"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ===================================================================
+         CONFIGURATIONS PAGE (THEMES, DECAY, OPTIONAL EMAIL & DRIVE BACKUP)
+         =================================================================== -->
+    <section id="view-config" style="display:none;">
+      <div class="config-grid">
+        <!-- LEFT: VISUAL THEMES & COLORS + DECAY -->
+        <div class="column">
+          <div class="card card-primary">
+            <div class="card-header">
+              <span class="card-title">Visual Theme &amp; Colors</span>
+              <button type="button" class="btn btn-sm" id="btn-reset-colors">Reset Colors</button>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Select Theme</label>
+              <div class="theme-grid-5" id="theme-grid"></div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Custom Accent Overrides (Live)</label>
+              <div class="color-pickers">
+                <div class="color-picker-box">
+                  <span>Primary</span>
+                  <input type="color" id="color-primary" value="#7c6df7" />
+                </div>
+                <div class="color-picker-box">
+                  <span>Gold / Rank</span>
+                  <input type="color" id="color-gold" value="#f5c542" />
+                </div>
+                <div class="color-picker-box">
+                  <span>Radar</span>
+                  <input type="color" id="color-radar" value="#a5b4fc" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-danger">
+            <div class="card-header">
+              <span class="card-title">Decay &amp; Reset</span>
+            </div>
+            <div class="form-group">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px;cursor:pointer;">
+                <input type="checkbox" id="setting-auto-decay" />
+                Automatically deduct XP when an ability is neglected past its grace period
+              </label>
+              <label class="form-label">Inactivity Grace Period (Days per Ability)</label>
+              <div class="form-row" id="grace-days-grid" style="grid-template-columns:repeat(5,1fr);"></div>
+            </div>
+            <div style="padding-top:12px;border-top:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+              <span style="font-size:12px;color:var(--text-muted);">Want to start over from Level 1 / Rank 1?</span>
+              <button type="button" class="btn btn-sm btn-danger" id="btn-fresh-start">Reset &amp; Re-run Setup</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: HEALTH CONNECT + OPTIONAL CLOUD & EMAIL BACKUP -->
+        <div class="column">
+          <div class="card card-silver">
+            <div class="card-header">
+              <span class="card-title">Health Connect (Scale &amp; Hevy)</span>
+              <span id="hc-status-label" style="font-size:10.5px;color:var(--text-muted);font-family:monospace;">Checking...</span>
+            </div>
+            <p class="config-note">
+              On the Android APK, syncs your <strong>bioimpedance scale</strong> (Weight &amp; Body Fat %) and <strong>Hevy workouts</strong> automatically via Android Health Connect. Workouts award Fitness XP and tick your Fitness Goalpost!
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-gold" id="btn-hc-connect">Connect Health Connect</button>
+              <button type="button" class="btn btn-primary" id="btn-hc-sync">↻ Sync Now</button>
+              <button type="button" class="btn btn-sm" id="btn-hc-simulate" title="Preview how scale + Hevy sync works">Test Sync</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Backup &amp; Multi-Device Sync (Optional)</span>
+              <span id="last-backup-label" style="font-size:10.5px;color:var(--text-muted);font-family:monospace;">No backup yet</span>
+            </div>
+            <p class="config-note">
+              Your data is saved automatically on this device. Backups are <strong>100% optional</strong> — use Email, Google Drive, or a local file whenever you want to continue on another PC or your phone.
+            </p>
+
+            <!-- EMAIL BACKUP -->
+            <div class="config-subbox">
+              <h4>✉ Email Backup</h4>
+              <p class="config-note">Downloads your save file and opens a pre-addressed email draft so you can mail it to yourself.</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <input class="form-input" id="backup-email" type="email" placeholder="your.email@example.com (optional)" style="flex:1;min-width:180px;" />
+                <button type="button" class="btn btn-gold" id="btn-backup-email">Email Backup</button>
+              </div>
+            </div>
+
+            <!-- GOOGLE DRIVE BACKUP -->
+            <div class="config-subbox" style="border-left-color:var(--accent-emerald);">
+              <h4>☁ Google Drive Backup</h4>
+              <p class="config-note">
+                <strong>Quick method:</strong> Download your backup file and drop it into Google Drive — zero setup needed.
+              </p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                <button type="button" class="btn btn-primary" id="btn-drive-quick">⬇ Download &amp; Open Drive</button>
+              </div>
+
+              <details style="font-size:12px;color:var(--text-muted);">
+                <summary style="cursor:pointer;color:var(--text-bright);font-weight:700;margin-bottom:8px;">
+                  Advanced: Direct 1-Click Google Drive Sync (Optional OAuth)
+                </summary>
+                <p class="config-note">
+                  Paste a Google Cloud OAuth 2.0 Web Client ID (with Drive API enabled &amp; <code>http://localhost:8123</code> as Authorized JS Origin) to upload/restore directly inside your Drive.
+                </p>
+                <div class="form-group" style="margin-bottom:8px;">
+                  <input class="form-input" id="backup-drive-client" placeholder="xxxx.apps.googleusercontent.com" />
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-sm btn-gold" id="btn-drive-upload">⬆ Sync to Drive</button>
+                  <button type="button" class="btn btn-sm" id="btn-drive-restore">⬇ Restore from Drive</button>
+                </div>
+              </details>
+            </div>
+
+            <!-- LOCAL FILE & TEXT CODE -->
+            <div class="config-subbox" style="border-left-color:var(--accent-silver);margin-bottom:0;">
+              <h4>💾 Local File &amp; Quick Transfer Code</h4>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <button type="button" class="btn btn-sm" id="btn-export-json">⬇ Export JSON</button>
+                <label class="btn btn-sm" style="cursor:pointer;">
+                  ⬆ Import JSON
+                  <input type="file" id="input-import-json" accept="application/json" style="display:none;" />
+                </label>
+                <button type="button" class="btn btn-sm" id="btn-copy-code">📋 Copy Backup Code</button>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <input class="form-input" id="restore-code-input" placeholder="Paste backup code here to restore..." style="font-size:12px;" />
+                <button type="button" class="btn btn-sm btn-gold" id="btn-restore-code">Restore</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: START SETUP & TUTORIAL WIZARD (FIRST LAUNCH)
+       ===================================================================== -->
+  <div class="modal-backdrop" id="modal-setup">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-header">
+        <span class="modal-title">✦ Welcome — Character Setup</span>
+        <button class="modal-close" id="btn-close-setup" style="display:none;" data-close-modal>&times;</button>
+      </div>
+
+      <div class="wizard-steps">
+        <div class="wizard-step-bar active" data-wiz-ind="1">1. Identity</div>
+        <div class="wizard-step-bar" data-wiz-ind="2">2. Skills</div>
+        <div class="wizard-step-bar" data-wiz-ind="3">3. How It Works</div>
+      </div>
+
+      <!-- STEP 1: IDENTITY & PHOTO -->
+      <div id="wiz-step-1">
+        <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px;">
+          Everyone starts at <strong>Level 1</strong> and <strong>Rank 1</strong> across all 5 stats. Set up your profile to begin.
+        </p>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="wiz-name">Your Name</label>
+            <input class="form-input" id="wiz-name" placeholder="e.g., Alex" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="wiz-age">Age</label>
+            <input class="form-input" id="wiz-age" type="number" min="10" max="120" placeholder="22" />
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="wiz-height">Height (cm)</label>
+            <input class="form-input" id="wiz-height" type="number" min="100" max="250" step="0.5" placeholder="175" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="wiz-weight">Weight (kg)</label>
+            <input class="form-input" id="wiz-weight" type="number" min="30" max="250" step="0.1" placeholder="70" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="wiz-goal">Main Life Goal</label>
+          <input class="form-input" id="wiz-goal" placeholder="e.g., Ace my classes, master Python & hit peak fitness" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Profile Photo (Optional — or keep pixel avatar)</label>
+          <input type="file" id="wiz-photo-input" accept="image/*" class="form-input" style="padding:6px;" />
+          <label style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+            <input type="checkbox" id="wiz-pixelate" />
+            Apply retro pixel-art filter to photo
+          </label>
+        </div>
+      </div>
+
+      <!-- STEP 2: STARTING SKILLS -->
+      <div id="wiz-step-2" style="display:none;">
+        <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px;">
+          Pick a few skills you want to train (all start at 0 XP). You can add or remove skills anytime.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Quick-Add Presets</label>
+          <div class="chip-selector" id="wiz-skill-presets">
+            <button type="button" class="chip-option" data-preset-skill="Python|🐍|productivity">🐍 Python</button>
+            <button type="button" class="chip-option" data-preset-skill="Philosophy / Reading|📖|culture">📖 Philosophy / Reading</button>
+            <button type="button" class="chip-option" data-preset-skill="Strength Training|⚔️|fitness">⚔️ Strength Training</button>
+            <button type="button" class="chip-option" data-preset-skill="Running|🏃|fitness">🏃 Running</button>
+            <button type="button" class="chip-option" data-preset-skill="University Class|🎓|academics">🎓 University Class</button>
+            <button type="button" class="chip-option" data-preset-skill="Social & Speaking|💬|charisma">💬 Social &amp; Speaking</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Or Add Your Own Custom Skill</label>
+          <div style="display:flex;gap:8px;">
+            <input class="form-input" id="wiz-custom-skill" placeholder="e.g., Calculus II, Guitar, French..." />
+            <select class="form-select" id="wiz-custom-skill-ab" style="width:160px;"></select>
+            <button type="button" class="btn btn-gold" id="btn-wiz-add-skill">+ Add</button>
+          </div>
+        </div>
+        <div id="wiz-added-skills" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;"></div>
+      </div>
+
+      <!-- STEP 3: QUICK TUTORIAL -->
+      <div id="wiz-step-3" style="display:none;">
+        <div class="tutorial-grid">
+          <div class="tut-card">
+            <h4>1. Persona Rank 1 → 5</h4>
+            <p>All 5 abilities start at <strong>Rank 1</strong>. Climbing to <strong>Rank 5</strong> takes real sustained effort. Fitness Rank 5 is scientifically gated by a healthy BMI for your height.</p>
+          </div>
+          <div class="tut-card">
+            <h4>2. Multi-Stat + Skill XP</h4>
+            <p>Every task scales XP by difficulty (<em>Trivial → Heroic</em>) and can boost multiple abilities + skills at once (e.g., Reading Sartre → Culture + Productivity + Philosophy).</p>
+          </div>
+          <div class="tut-card">
+            <h4>3. 3 Recurring Modes</h4>
+            <p><strong>Days of Week</strong> (Mon/Tue, weekends), <strong>Spaced</strong> (every N days from last check-in), and <strong>Weekly Goalpost</strong> (e.g., 4×/week: partial XP per day + big bonus on quota!).</p>
+          </div>
+          <div class="tut-card">
+            <h4>4. Auto &amp; Manual Decay</h4>
+            <p>Neglecting an ability past its grace period auto-drains XP, and you can log manual setbacks (bad exam, missed week). You <strong>can</strong> drop Ranks!</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn" id="btn-wiz-back" style="visibility:hidden;">← Back</button>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn btn-gold" id="btn-wiz-next">Next →</button>
+          <button type="button" class="btn btn-primary" id="btn-wiz-finish" style="display:none;">Start at Rank 1 ✦</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: NEW TASK (ONE-TIME / DAYS OF WEEK / SPACED / GOALPOST)
+       ===================================================================== -->
+  <div class="modal-backdrop" id="modal-task">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">+ New Task / Habit</span>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <form id="form-task">
+        <div class="form-group">
+          <label class="form-label" for="task-title">Task Name</label>
+          <input class="form-input" id="task-title" required placeholder="e.g., Workout, Code Python 2h, Read Sartre, Attend Class" />
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="task-difficulty">Difficulty (XP)</label>
+            <select class="form-select" id="task-difficulty"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="task-recurrence">Schedule Type</label>
+            <select class="form-select" id="task-recurrence">
+              <option value="one_time">One-Time (Day / Week)</option>
+              <option value="weekdays">Recurring: Days of the Week</option>
+              <option value="spaced">Recurring: Spaced (Every N Days)</option>
+              <option value="goalpost">Recurring: Weekly Goalpost (X× / Week)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Dynamic Recurrence Options -->
+        <div class="recurrence-box" id="rec-opt-one_time">
+          <div class="form-row-2">
+            <div>
+              <label class="form-label" for="task-scope">Add To</label>
+              <select class="form-select" id="task-scope">
+                <option value="today">Today</option>
+                <option value="week">This Week</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" for="task-due-date">Due Date</label>
+              <input class="form-input" id="task-due-date" type="date" />
+            </div>
+          </div>
+        </div>
+
+        <div class="recurrence-box" id="rec-opt-weekdays" style="display:none;">
+          <label class="form-label">Select Days of the Week</label>
+          <div class="chip-selector" id="task-weekday-chips" style="margin-bottom:8px;"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm" data-day-preset="weekdays">Mon–Fri</button>
+            <button type="button" class="btn btn-sm" data-day-preset="weekends">Weekends</button>
+            <button type="button" class="btn btn-sm" data-day-preset="everyday">Every Day</button>
+          </div>
+        </div>
+
+        <div class="recurrence-box" id="rec-opt-spaced" style="display:none;">
+          <label class="form-label" for="task-interval">Repeat Every N Days (independent of weekday)</label>
+          <input class="form-input" id="task-interval" type="number" min="1" max="60" value="2" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:5px;">
+            When you check this off, the next due date automatically shifts to N days later.
+          </div>
+        </div>
+
+        <div class="recurrence-box" id="rec-opt-goalpost" style="display:none;">
+          <label class="form-label" for="task-weekly-target">Target Times Per Week (Mon–Sun)</label>
+          <input class="form-input" id="task-weekly-target" type="number" min="1" max="7" value="4" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:5px;">
+            Awards <strong>60% XP</strong> on each check-in, plus a <strong>+100% Quota Bonus</strong> when you hit the weekly target!
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Abilities Gained (1st = 100%, others = 60%)</label>
+          <div class="chip-selector" id="task-ability-chips"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Skills Trained (Optional)</label>
+          <div class="chip-selector" id="task-skill-chips"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-gold">Create Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: LOG SETBACK / PENALTY
+       ===================================================================== -->
+  <div class="modal-backdrop" id="modal-penalty">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" style="color:var(--accent-danger);">▼ Log Setback / Rank Penalty</span>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <form id="form-penalty">
+        <div class="form-group">
+          <label class="form-label" for="penalty-title">What happened?</label>
+          <input class="form-input" id="penalty-title" required placeholder="e.g., Bad exam grade, Skipped gym all week, Ignored friends" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="penalty-severity">Severity</label>
+          <select class="form-select" id="penalty-severity"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Affected Abilities (Can cause Rank Down)</label>
+          <div class="chip-selector" id="penalty-ability-chips"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Affected Skills (Optional)</label>
+          <div class="chip-selector" id="penalty-skill-chips"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-danger">Apply Penalty</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: ADD SKILL
+       ===================================================================== -->
+  <div class="modal-backdrop" id="modal-skill">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">+ Add Skill</span>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <form id="form-skill">
+        <div class="form-group">
+          <label class="form-label" for="skill-name">Skill Name</label>
+          <input class="form-input" id="skill-name" required placeholder="e.g., Python, Calculus II, Sartre, Calisthenics" />
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="skill-icon">Icon / Emoji</label>
+            <input class="form-input" id="skill-icon" value="✦" maxlength="4" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="skill-ability">Primary Ability</label>
+            <select class="form-select" id="skill-ability"></select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-gold">Add Skill</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: EDIT PROFILE & PHOTO
+       ===================================================================== -->
+  <div class="modal-backdrop" id="modal-profile">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">✎ Edit Profile &amp; Photo</span>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <form id="form-profile">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="prof-name">Name</label>
+            <input class="form-input" id="prof-name" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="prof-class">Custom Title (Optional)</label>
+            <input class="form-input" id="prof-class" placeholder="Auto-updates with Level" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="prof-age">Age</label>
+            <input class="form-input" id="prof-age" type="number" min="10" max="120" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="prof-height">Height (cm)</label>
+            <input class="form-input" id="prof-height" type="number" min="100" max="250" step="0.5" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="prof-weight">Weight (kg)</label>
+            <input class="form-input" id="prof-weight" type="number" min="30" max="250" step="0.1" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="prof-goal">Main Goal</label>
+          <textarea class="form-textarea" id="prof-goal" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Profile Picture</label>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <input type="file" id="prof-photo-input" accept="image/*" class="form-input" style="flex:1;padding:6px;" />
+            <button type="button" class="btn btn-sm" id="btn-reset-avatar">Pixel Avatar</button>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+            <input type="checkbox" id="prof-pixelate" />
+            Apply retro pixel-art filter to my photo
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-gold">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
