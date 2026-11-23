@@ -28,6 +28,7 @@ import {
   completeTask,
   deleteTask,
   deleteLogEntry,
+  updateLogEntry,
   logPenalty,
   runAutoDecayCheck,
   recordBodySnapshot,
@@ -96,6 +97,7 @@ let reviewPrevWeek = false;
 let pendingAvatarDataUrl = undefined;
 let editingSkillId = null;
 let editingTaskId = null;
+let editingLogId = null;
 let pendingSkillImage = undefined;
 let wizStep = 1;
 let wizPhotoDataUrl = null;
@@ -385,6 +387,7 @@ function populateSkillModal(skillId = null) {
     document.getElementById('btn-skill-submit').textContent = 'Save Skill';
     document.getElementById('skill-name').value = sk.name;
     document.getElementById('skill-ability').value = sk.linkedAbility || 'productivity';
+    document.getElementById('skill-keywords').value = sk.keywords || '';
     document.getElementById('skill-ms-label').value = sk.milestone?.label || '';
     document.getElementById('skill-ms-current').value = sk.milestone?.current ?? '';
     document.getElementById('skill-ms-target').value = sk.milestone?.target ?? '';
@@ -395,12 +398,38 @@ function populateSkillModal(skillId = null) {
     document.getElementById('btn-skill-submit').textContent = 'Add Skill';
     document.getElementById('skill-name').value = '';
     document.getElementById('skill-ability').value = 'productivity';
+    document.getElementById('skill-keywords').value = '';
     document.getElementById('skill-ms-label').value = '';
     document.getElementById('skill-ms-current').value = '';
     document.getElementById('skill-ms-target').value = '';
     document.getElementById('skill-ms-unit').value = '';
     renderSkillImgPreview(null, 'productivity');
   }
+}
+
+function populateEditLogModal(logId) {
+  editingLogId = logId;
+  const entry = (state.logs || []).find(l => l.id === logId);
+  if (!entry) return false;
+  document.getElementById('edit-log-title').value = entry.title || '';
+
+  const selAbs = entry.abilities || [];
+  document.getElementById('edit-log-ability-chips').innerHTML = ABILITIES.map(
+    ab => `<button type="button" class="chip-option ${selAbs.includes(ab.id) ? 'selected' : ''}" data-ability="${ab.id}">${ab.label}</button>`
+  ).join('');
+
+  const selSkills = entry.skillIds || [];
+  const skWrap = document.getElementById('edit-log-skill-chips');
+  skWrap.innerHTML =
+    state.skills.length === 0
+      ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
+      : state.skills
+          .map(
+            sk =>
+              `<button type="button" class="chip-option ${selSkills.includes(sk.id) ? 'selected-gold' : ''}" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${escapeHtml(sk.name)}</button>`
+          )
+          .join('');
+  return true;
 }
 
 function populateBossModal() {
@@ -1087,6 +1116,15 @@ function bindEvents() {
       return;
     }
 
+    // Edit completed log entry (re-link skills & abilities)
+    const editLogBtn = e.target.closest('[data-edit-log]');
+    if (editLogBtn) {
+      if (populateEditLogModal(editLogBtn.dataset.editLog)) {
+        openModal('modal-edit-log');
+      }
+      return;
+    }
+
     // Delete log entry & reverse XP
     const delLogBtn = e.target.closest('[data-delete-log]');
     if (delLogBtn) {
@@ -1173,6 +1211,28 @@ function bindEvents() {
       refreshCurrentView();
       showToast(`Added task: "${title}"`);
     }
+  });
+
+  // Save Edited Log Entry & Re-Route XP
+  document.getElementById('form-edit-log').addEventListener('submit', e => {
+    e.preventDefault();
+    if (!editingLogId) return;
+    const title = document.getElementById('edit-log-title').value.trim();
+    const abilityIds = [...document.querySelectorAll('#edit-log-ability-chips .chip-option.selected')].map(c => c.dataset.ability);
+    const skillIds = [...document.querySelectorAll('#edit-log-skill-chips .chip-option.selected-gold')].map(c => c.dataset.skill);
+
+    if (abilityIds.length === 0 && skillIds.length === 0) {
+      showToast('Select at least one Ability or Skill.', 'danger');
+      return;
+    }
+
+    updateLogEntry(state, editingLogId, { title, abilityIds, skillIds });
+    editingLogId = null;
+    closeAllModals();
+    sfx.click();
+    refreshCurrentView();
+    checkAchievementsAndNotify();
+    showToast('Log updated & XP re-routed cleanly!');
   });
 
   // Summon New Boss
@@ -1265,6 +1325,7 @@ function bindEvents() {
     e.preventDefault();
     const name = document.getElementById('skill-name').value.trim();
     const linkedAbility = document.getElementById('skill-ability').value;
+    const keywords = document.getElementById('skill-keywords').value.trim();
     const msLabel = document.getElementById('skill-ms-label').value.trim();
     const msTarget = Number(document.getElementById('skill-ms-target').value) || 0;
     const msCurrent = Number(document.getElementById('skill-ms-current').value) || 0;
@@ -1277,6 +1338,7 @@ function bindEvents() {
       if (sk) {
         sk.name = name;
         sk.linkedAbility = linkedAbility;
+        sk.keywords = keywords;
         sk.milestone = milestone;
         if (pendingSkillImage !== undefined) sk.iconImage = pendingSkillImage;
         saveState(state);
@@ -1290,6 +1352,7 @@ function bindEvents() {
         name,
         iconImage: pendingSkillImage || null,
         linkedAbility,
+        keywords,
         milestone,
         xp: 0,
       });

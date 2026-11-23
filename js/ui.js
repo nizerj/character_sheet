@@ -494,8 +494,9 @@ export function renderApp(state, activeTrackerTab = 'today') {
             <div class="log-entry ${isPen ? 'penalty' : ''}">
               <div class="task-top">
                 <div class="task-title">${escapeHtml(entry.title)}</div>
-                <div style="display:flex;align-items:center;gap:6px;">
+                <div style="display:flex;align-items:center;gap:4px;">
                   <div class="task-xp" style="${isPen ? 'color:var(--accent-danger);' : ''}">${xpText}</div>
+                  ${isPen ? '' : `<button class="task-icon-btn" data-edit-log="${entry.id}" title="Edit title / relink skill &amp; stats">✎</button>`}
                   <button class="skill-del" data-delete-log="${entry.id}" title="Delete &amp; reverse XP">✕</button>
                 </div>
               </div>

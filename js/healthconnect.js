@@ -52,15 +52,29 @@ function formatPace(minutes, distanceKm) {
   return `${adjM}:${String(adjS).padStart(2, '0')}/km`;
 }
 
-function matchFitnessSkill(skills, category) {
+function matchFitnessSkill(skills, category, workoutTitle = '') {
   const fitSkills = (skills || []).filter(s => s.linkedAbility === 'fitness');
+  const titleLower = String(workoutTitle || '').toLowerCase();
+
+  // 1. First check user-defined Auto-Match Keywords across ALL skills (lets any workout title route to exact skill!)
+  for (const sk of skills || []) {
+    if (!sk.keywords) continue;
+    const kwList = String(sk.keywords).split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+    if (kwList.some(kw => titleLower.includes(kw))) {
+      return sk;
+    }
+  }
+
   if (fitSkills.length === 0) return null;
 
-  if (category === 'running' || category === 'cardio') {
-    const cardioRx = /(run|corrida|cardio|jog|bike|cycl|swim|walk|hike|treadmill)/i;
+  // 2. Smart cardio/running detection even when logged inside Hevy!
+  const cardioRx = /(run|corrida|cardio|jog|bike|cycl|swim|walk|hike|treadmill|esteira|elliptical|hiit|rowing|jump\s*rope|spinning)/i;
+  const effectiveCategory = cardioRx.test(titleLower) ? 'cardio' : category;
+
+  if (effectiveCategory === 'running' || effectiveCategory === 'cardio') {
     const match = fitSkills.find(s => cardioRx.test(s.name));
     if (match) return match;
-  } else if (category === 'strength') {
+  } else if (effectiveCategory === 'strength') {
     const strRx = /(strength|gym|weight|lift|hevy|muscul|calisthenics|train|academia)/i;
     const match = fitSkills.find(s => strRx.test(s.name));
     if (match) return match;
@@ -221,10 +235,6 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     return score(a) - score(b);
   });
 
-  const fitnessGoalpost = state.tasks.find(
-    t => t.recurrence === 'goalpost' && (t.abilities || []).includes('fitness')
-  );
-
   for (const session of prioritized) {
     const sid = session.id || `${session.startTime}_${session.durationMinutes}`;
     if (state.healthConnect.syncedWorkoutIds.includes(sid)) continue;
@@ -261,9 +271,21 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     const goldEarned = Math.max(10, Math.round(xp * 0.4));
     const nowIso = session.endTime || new Date().toISOString();
 
+    const matchedSkill = matchFitnessSkill(state.skills, category, baseTitle);
+    const targetAb = matchedSkill?.linkedAbility && state.abilities[matchedSkill.linkedAbility]
+      ? matchedSkill.linkedAbility
+      : 'fitness';
+
     const sessionDay = isoToLocalDayKey(session.startTime || nowIso);
-    if (fitnessGoalpost && sessionDay === today) {
-      const res = completeTask(state, fitnessGoalpost.id);
+    const matchingGoalpost = state.tasks.find(t => {
+      if (t.recurrence !== 'goalpost' || !(t.abilities || []).includes(targetAb)) return false;
+      if (matchedSkill && Array.isArray(t.skillIds) && t.skillIds.length > 0) {
+        return t.skillIds.includes(matchedSkill.id);
+      }
+      return true;
+    });
+    if (matchingGoalpost && sessionDay === today) {
+      const res = completeTask(state, matchingGoalpost.id);
       if (res) {
         summary.workoutsImported++;
         summary.totalFitnessXp += res.gainedTotalXp;
@@ -271,13 +293,12 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
       }
     }
 
-    state.abilities.fitness.xp = (state.abilities.fitness.xp || 0) + xp;
-    state.abilities.fitness.lastActivity = nowIso;
-    state.abilities.fitness.lastDecayDate = nowIso;
+    state.abilities[targetAb].xp = (state.abilities[targetAb].xp || 0) + xp;
+    state.abilities[targetAb].lastActivity = nowIso;
+    state.abilities[targetAb].lastDecayDate = nowIso;
     state.totalXp += xp;
     state.gold = (state.gold || 0) + goldEarned;
 
-    const matchedSkill = matchFitnessSkill(state.skills, category);
     const skillIds = [];
     const skillDeltas = {};
     if (matchedSkill) {
@@ -294,9 +315,9 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
       baseXp: xp,
       totalXpDelta: xp,
       goldDelta: goldEarned,
-      abilityDeltas: { fitness: xp },
+      abilityDeltas: { [targetAb]: xp },
       skillDeltas,
-      abilities: ['fitness'],
+      abilities: [targetAb],
       skillIds,
       hcSessionId: sid,
       timestamp: nowIso,

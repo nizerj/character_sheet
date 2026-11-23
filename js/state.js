@@ -862,6 +862,88 @@ export function deleteLogEntry(state, logId) {
   return { title: entry.title, reversedXp: totalDelta };
 }
 
+// Edits a completed task/workout log entry and cleanly re-routes its XP to the new Abilities & Skills
+export function updateLogEntry(state, logId, { title, abilityIds, skillIds }) {
+  const entry = (state.logs || []).find(l => l.id === logId);
+  if (!entry || entry.type === 'penalty') return null;
+
+  // 1. Reverse old Ability XP
+  let oldAbilityTotal = 0;
+  if (entry.abilityDeltas && Object.keys(entry.abilityDeltas).length > 0) {
+    for (const [abId, delta] of Object.entries(entry.abilityDeltas)) {
+      if (state.abilities[abId]) {
+        state.abilities[abId].xp = Math.max(0, (state.abilities[abId].xp || 0) - delta);
+      }
+      oldAbilityTotal += delta;
+    }
+  } else if (Array.isArray(entry.abilities) && entry.abilities.length > 0) {
+    const share = Math.round((entry.baseXp || 0) / entry.abilities.length);
+    entry.abilities.forEach(abId => {
+      if (state.abilities[abId]) state.abilities[abId].xp = Math.max(0, state.abilities[abId].xp - share);
+      oldAbilityTotal += share;
+    });
+  }
+
+  // 2. Reverse old Skill XP (and remember per-skill XP weight)
+  let baseSkillXp = entry.baseXp || 0;
+  if (entry.skillDeltas && Object.keys(entry.skillDeltas).length > 0) {
+    const vals = Object.values(entry.skillDeltas);
+    if (vals.length > 0) baseSkillXp = vals[0];
+    for (const [skId, delta] of Object.entries(entry.skillDeltas)) {
+      const sk = state.skills.find(s => s.id === skId);
+      if (sk) sk.xp = Math.max(0, (sk.xp || 0) - delta);
+    }
+  } else if (Array.isArray(entry.skillIds) && entry.skillIds.length > 0) {
+    entry.skillIds.forEach(skId => {
+      const sk = state.skills.find(s => s.id === skId);
+      if (sk) sk.xp = Math.max(0, (sk.xp || 0) - baseSkillXp);
+    });
+  }
+
+  // 3. Apply XP to new Abilities (preserving exact total ability XP pool so editing never inflates XP!)
+  let validAbilities = (abilityIds || []).filter(abId => Boolean(state.abilities[abId]));
+  if (validAbilities.length === 0 && Array.isArray(skillIds) && skillIds.length > 0) {
+    const firstSk = state.skills.find(s => s.id === skillIds[0]);
+    if (firstSk?.linkedAbility && state.abilities[firstSk.linkedAbility]) {
+      validAbilities = [firstSk.linkedAbility];
+    }
+  }
+  const newAbilityDeltas = {};
+  const xpPool = oldAbilityTotal > 0 ? oldAbilityTotal : (entry.baseXp || 0);
+  if (validAbilities.length > 0 && xpPool > 0) {
+    const weights = validAbilities.map((_, i) => (i === 0 ? 1.0 : 0.6));
+    const wSum = weights.reduce((a, b) => a + b, 0);
+    let distributed = 0;
+    validAbilities.forEach((abId, i) => {
+      const share = i === validAbilities.length - 1 ? Math.max(1, xpPool - distributed) : Math.max(1, Math.round((xpPool * weights[i]) / wSum));
+      distributed += share;
+      state.abilities[abId].xp = (state.abilities[abId].xp || 0) + share;
+      newAbilityDeltas[abId] = share;
+    });
+  }
+
+  // 4. Apply XP to new Skills
+  const newSkillIds = [];
+  const newSkillDeltas = {};
+  (skillIds || []).forEach(skId => {
+    const sk = state.skills.find(s => s.id === skId);
+    if (sk) {
+      sk.xp = (sk.xp || 0) + baseSkillXp;
+      newSkillIds.push(sk.id);
+      newSkillDeltas[sk.id] = baseSkillXp;
+    }
+  });
+
+  if (title && title.trim()) entry.title = title.trim();
+  entry.abilities = validAbilities;
+  entry.abilityDeltas = newAbilityDeltas;
+  entry.skillIds = newSkillIds;
+  entry.skillDeltas = newSkillDeltas;
+
+  saveState(state);
+  return entry;
+}
+
 // --- SKILL MILESTONE / SUB-QUEST INCREMENT ---
 export function incrementSkillMilestone(state, skillId, stepAmount) {
   const sk = state.skills.find(s => s.id === skillId);
