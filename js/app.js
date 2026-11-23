@@ -847,13 +847,29 @@ if (!state.setupCompleted) {
     showToast(`▼ Auto-Decay triggered: ${summary}`, 'danger');
   }
   if (isNativeAndroid() && state.healthConnect?.connected) {
-    syncHealthConnect(state, 7)
-      .then(s => {
-        if (s.weightUpdated || s.workoutsImported > 0) {
-          renderApp(state, activeTrackerTab);
-          showToast(`Health Connect auto-synced (+${s.workoutsImported} workout(s))`);
-        }
-      })
-      .catch(() => {});
+    const runSilentHcSync = () => {
+      syncHealthConnect(state, 7)
+        .then(s => {
+          if (s.weightUpdated || s.workoutsImported > 0) {
+            renderApp(state, activeTrackerTab);
+            const parts = [];
+            if (s.weightUpdated) parts.push(`Weight → ${s.newWeightKg}kg`);
+            if (s.workoutsImported > 0) parts.push(`+${s.workoutsImported} workout(s)`);
+            showToast(`Health Connect synced: ${parts.join(' · ')}`);
+          }
+        })
+        .catch(() => {});
+    };
+
+    runSilentHcSync();
+
+    // Also auto-sync whenever you switch back to the app after weighing in or finishing a Hevy workout
+    let lastResumeSync = Date.now();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastResumeSync > 30000) {
+        lastResumeSync = Date.now();
+        runSilentHcSync();
+      }
+    });
   }
 }
