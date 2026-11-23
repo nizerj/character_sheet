@@ -28,18 +28,51 @@ export async function requestHealthConnectPermissions() {
   return await plugin.requestPermissions();
 }
 
-function durationToDifficulty(minutes) {
-  if (minutes >= 85) return 'heroic';
-  if (minutes >= 50) return 'hard';
-  if (minutes >= 25) return 'medium';
-  return 'easy';
+function workoutToDifficultyAndXp(minutes, distanceKm = 0, category = 'workout') {
+  if ((category === 'running' && distanceKm >= 10) || minutes >= 85) {
+    return { diffId: 'heroic', xp: 190 };
+  }
+  if ((category === 'running' && distanceKm >= 5) || minutes >= 50) {
+    return { diffId: 'hard', xp: 115 };
+  }
+  if ((category === 'running' && distanceKm >= 2) || minutes >= 25) {
+    return { diffId: 'medium', xp: 65 };
+  }
+  return { diffId: 'easy', xp: 35 };
 }
 
-function durationToXp(minutes) {
-  if (minutes >= 85) return 190;
-  if (minutes >= 50) return 115;
-  if (minutes >= 25) return 65;
-  return 35;
+function formatPace(minutes, distanceKm) {
+  if (!distanceKm || distanceKm < 0.3 || !minutes || minutes <= 0) return '';
+  const paceMin = minutes / distanceKm;
+  if (paceMin < 2 || paceMin > 20) return '';
+  const m = Math.floor(paceMin);
+  const s = Math.round((paceMin - m) * 60);
+  const adjM = s === 60 ? m + 1 : m;
+  const adjS = s === 60 ? 0 : s;
+  return `${adjM}:${String(adjS).padStart(2, '0')}/km`;
+}
+
+function matchFitnessSkill(skills, category) {
+  const fitSkills = (skills || []).filter(s => s.linkedAbility === 'fitness');
+  if (fitSkills.length === 0) return null;
+
+  if (category === 'running' || category === 'cardio') {
+    const cardioRx = /(run|corrida|cardio|jog|bike|cycl|swim|walk|hike|treadmill)/i;
+    const match = fitSkills.find(s => cardioRx.test(s.name));
+    if (match) return match;
+  } else if (category === 'strength') {
+    const strRx = /(strength|gym|weight|lift|hevy|muscul|calisthenics|train|academia)/i;
+    const match = fitSkills.find(s => strRx.test(s.name));
+    if (match) return match;
+  }
+  return fitSkills[0];
+}
+
+// Checks if two workouts from different apps (e.g., Hevy + Samsung Health) overlap in time within ±3 min
+function isOverlappingSyncedSession(windows, startMs, endMs) {
+  if (!startMs || !endMs || !Array.isArray(windows)) return false;
+  const pad = 3 * 60 * 1000;
+  return windows.some(w => startMs <= w.end + pad && endMs >= w.start - pad);
 }
 
 export function disconnectHealthConnect(state) {
@@ -53,21 +86,24 @@ export function disconnectHealthConnect(state) {
     lastSleepHours: null,
     sleepDate: null,
     todaySteps: 0,
+    stepsSource: null,
     stepsDate: null,
     stepsBonusAwardedDate: null,
+    todayDistanceKm: 0,
+    distanceDate: null,
     syncedWorkoutIds: [],
+    syncedWorkoutWindows: [],
   };
   saveState(state);
 }
 
-// Applies synced scale + workout + sleep + steps data into app state
+// Applies synced Samsung Health + Bioimpedance Scale + Hevy data into app state (deduplicated!)
 export function applyHealthConnectData(state, payload, { simulated = false } = {}) {
   if (!state.healthConnect) {
     disconnectHealthConnect(state);
   }
-  if (!Array.isArray(state.healthConnect.syncedWorkoutIds)) {
-    state.healthConnect.syncedWorkoutIds = [];
-  }
+  if (!Array.isArray(state.healthConnect.syncedWorkoutIds)) state.healthConnect.syncedWorkoutIds = [];
+  if (!Array.isArray(state.healthConnect.syncedWorkoutWindows)) state.healthConnect.syncedWorkoutWindows = [];
 
   const today = todayKey();
   const summary = {
@@ -79,11 +115,12 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     totalFitnessXp: 0,
     lastSleepHours: null,
     todaySteps: 0,
+    stepsSource: null,
+    todayDistanceKm: 0,
     stepBonusAwarded: false,
   };
 
   // 1. Bioimpedance Scale: Weight, Body Fat %, Lean Body Mass
-  // BUG FIX: When real Health Connect sync returns NO body fat record, clear stale/simulated values so user is never wrongly labeled "Shredded"!
   const rawWeight = Number(payload.latestWeightKg);
   const rawBf = Number(payload.latestBodyFatPct);
   const rawLean = Number(payload.latestLeanMassKg);
@@ -117,7 +154,6 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     state.healthConnect.leanMassKg = null;
   }
 
-  // Record daily body trend point if weight exists
   if (state.profile.weightKg) {
     recordBodySnapshot(state);
   }
@@ -130,28 +166,33 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     summary.lastSleepHours = state.healthConnect.lastSleepHours;
   }
 
-  // 3. Steps today + 8,000-step daily Fitness Bonus
+  // 3. Steps today (Samsung Health prioritized natively -> ZERO double counting!)
   const rawSteps = Math.round(Number(payload.todaySteps) || 0);
   if (rawSteps > 0) {
     state.healthConnect.todaySteps = rawSteps;
+    state.healthConnect.stepsSource = payload.stepsSource || 'Health Connect';
     state.healthConnect.stepsDate = today;
     summary.todaySteps = rawSteps;
+    summary.stepsSource = state.healthConnect.stepsSource;
 
     if (rawSteps >= 8000 && state.healthConnect.stepsBonusAwardedDate !== today) {
       state.healthConnect.stepsBonusAwardedDate = today;
       const stepXp = 25;
+      const stepGold = 12;
       const nowIso = new Date().toISOString();
       state.abilities.fitness.xp = (state.abilities.fitness.xp || 0) + stepXp;
       state.abilities.fitness.lastActivity = nowIso;
       state.abilities.fitness.lastDecayDate = nowIso;
       state.totalXp += stepXp;
+      state.gold = (state.gold || 0) + stepGold;
       state.logs.unshift({
         id: 'hc_steps_' + today,
         type: 'task',
-        title: `👟 8K+ Steps Bonus (${rawSteps.toLocaleString()} steps)`,
+        title: `👟 8K+ Steps Bonus (${rawSteps.toLocaleString()} · ${state.healthConnect.stepsSource})`,
         difficulty: 'easy',
         baseXp: stepXp,
         totalXpDelta: stepXp,
+        goldDelta: stepGold,
         abilityDeltas: { fitness: stepXp },
         skillDeltas: {},
         abilities: ['fitness'],
@@ -164,22 +205,60 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     }
   }
 
-  // 4. Hevy / Exercise Sessions
+  // 4. Today's Cardio / Walking Distance (Samsung Health prioritized)
+  const rawDist = Number(payload.todayDistanceKm) || 0;
+  if (rawDist > 0.05) {
+    state.healthConnect.todayDistanceKm = Math.round(rawDist * 100) / 100;
+    state.healthConnect.distanceDate = today;
+    summary.todayDistanceKm = state.healthConnect.todayDistanceKm;
+  }
+
+  // 5. Exercise Sessions (Hevy Strength + Samsung Health Running & Cardio — deduplicated by ID & time overlap!)
   const sessions = Array.isArray(payload.workouts) ? payload.workouts : [];
-  const fitnessSkill = state.skills.find(s => s.linkedAbility === 'fitness');
+  // Prefer Hevy for strength sessions & Samsung Health for running/cardio if overlapping sessions exist
+  const prioritized = [...sessions].sort((a, b) => {
+    const score = s => (s.sourceApp === 'Hevy' && s.category === 'strength' ? 0 : s.sourceApp === 'Samsung Health' ? 1 : 2);
+    return score(a) - score(b);
+  });
+
   const fitnessGoalpost = state.tasks.find(
     t => t.recurrence === 'goalpost' && (t.abilities || []).includes('fitness')
   );
 
-  for (const session of sessions) {
+  for (const session of prioritized) {
     const sid = session.id || `${session.startTime}_${session.durationMinutes}`;
     if (state.healthConnect.syncedWorkoutIds.includes(sid)) continue;
 
+    const startMs = session.startTime ? new Date(session.startTime).getTime() : 0;
+    const endMs = session.endTime ? new Date(session.endTime).getTime() : 0;
+    if (isOverlappingSyncedSession(state.healthConnect.syncedWorkoutWindows, startMs, endMs)) {
+      // Skip duplicate session mirrored across both Hevy and Samsung Health
+      state.healthConnect.syncedWorkoutIds.push(sid);
+      continue;
+    }
+
     state.healthConnect.syncedWorkoutIds.push(sid);
+    if (startMs && endMs) {
+      state.healthConnect.syncedWorkoutWindows.push({ start: startMs, end: endMs });
+    }
+
     const mins = Math.max(10, Math.round(session.durationMinutes || 45));
-    const title = session.title?.trim() || `Hevy Workout (${mins} min)`;
-    const diffId = durationToDifficulty(mins);
-    const xp = durationToXp(mins);
+    const category = session.category || 'workout';
+    const distKm = Number(session.distanceKm) || 0;
+    const sourceApp = session.sourceApp || 'Health Connect';
+    const baseTitle = session.title?.trim() || (category === 'running' ? 'Running' : 'Workout');
+    const pace = category === 'running' ? formatPace(mins, distKm) : '';
+    const icon = category === 'running' ? '🏃' : category === 'cardio' ? '🚴' : '🏋️';
+
+    const details = [];
+    if (distKm > 0) details.push(`${distKm} km`);
+    details.push(`${mins}m`);
+    if (pace) details.push(pace);
+    details.push(sourceApp);
+
+    const formattedTitle = `${icon} ${baseTitle} (${details.join(' · ')})`;
+    const { diffId, xp } = workoutToDifficultyAndXp(mins, distKm, category);
+    const goldEarned = Math.max(10, Math.round(xp * 0.4));
     const nowIso = session.endTime || new Date().toISOString();
 
     const sessionDay = isoToLocalDayKey(session.startTime || nowIso);
@@ -196,22 +275,25 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     state.abilities.fitness.lastActivity = nowIso;
     state.abilities.fitness.lastDecayDate = nowIso;
     state.totalXp += xp;
+    state.gold = (state.gold || 0) + goldEarned;
 
+    const matchedSkill = matchFitnessSkill(state.skills, category);
     const skillIds = [];
     const skillDeltas = {};
-    if (fitnessSkill) {
-      fitnessSkill.xp = (fitnessSkill.xp || 0) + xp;
-      skillIds.push(fitnessSkill.id);
-      skillDeltas[fitnessSkill.id] = xp;
+    if (matchedSkill) {
+      matchedSkill.xp = (matchedSkill.xp || 0) + xp;
+      skillIds.push(matchedSkill.id);
+      skillDeltas[matchedSkill.id] = xp;
     }
 
     state.logs.unshift({
       id: 'hc_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
       type: 'task',
-      title: `🏋️ ${title} (Health Connect · ${mins}m)`,
+      title: formattedTitle,
       difficulty: diffId,
       baseXp: xp,
       totalXpDelta: xp,
+      goldDelta: goldEarned,
       abilityDeltas: { fitness: xp },
       skillDeltas,
       abilities: ['fitness'],
@@ -227,6 +309,9 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
 
   if (state.healthConnect.syncedWorkoutIds.length > 200) {
     state.healthConnect.syncedWorkoutIds = state.healthConnect.syncedWorkoutIds.slice(-200);
+  }
+  if (state.healthConnect.syncedWorkoutWindows.length > 100) {
+    state.healthConnect.syncedWorkoutWindows = state.healthConnect.syncedWorkoutWindows.slice(-100);
   }
 
   state.healthConnect.connected = true;

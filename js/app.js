@@ -1428,11 +1428,16 @@ function bindEvents() {
         latestBodyFatPct: 14.8,
         lastSleepHours: 7.5,
         todaySteps: 8450,
+        stepsSource: 'Samsung Health',
+        todayDistanceKm: 5.4,
         workouts: [
           {
-            id: 'sim_hevy_' + todayKey(),
-            title: 'Hevy — Push Day',
-            durationMinutes: 62,
+            id: 'sim_run_' + todayKey(),
+            title: 'Morning Run',
+            category: 'running',
+            sourceApp: 'Samsung Health',
+            distanceKm: 5.2,
+            durationMinutes: 31,
             startTime: new Date().toISOString(),
             endTime: new Date().toISOString(),
           },
@@ -1444,8 +1449,8 @@ function bindEvents() {
     checkAchievementsAndNotify();
     showToast(
       summary.workoutsImported > 0
-        ? `Test Sync: BF ${summary.bodyFatPct}% · Sleep 7.5h (+10% XP) · 8,450 steps · +1 Hevy workout!`
-        : `Test Sync updated (today's test workout & step bonus already logged).`
+        ? `Test Sync: Samsung Health 8,450 steps · 5.2 km Run · BF ${summary.bodyFatPct}% · Sleep 7.5h!`
+        : `Test Sync updated (today's test run & step bonus already logged).`
     );
   });
 

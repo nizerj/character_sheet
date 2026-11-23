@@ -1,4 +1,4 @@
-const CACHE_NAME = 'life-sheet-v5';
+const CACHE_NAME = 'life-sheet-v6';
 const CORE_ASSETS = [
   './',
   './index.html',

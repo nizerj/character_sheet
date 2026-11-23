@@ -317,7 +317,12 @@ export function renderApp(state, activeTrackerTab = 'today') {
 
   if (hcOn && state.healthConnect?.stepsDate === todayKey() && state.healthConnect?.todaySteps > 0) {
     const steps = state.healthConnect.todaySteps;
-    statusItems.push(`<div class="status-pill ${steps >= 8000 ? 'buff' : 'warn'}"><span>👟 TODAY'S STEPS</span><span>${steps.toLocaleString()}</span></div>`);
+    const src = state.healthConnect.stepsSource === 'Samsung Health' ? 'S-Health' : 'Steps';
+    const distPart =
+      state.healthConnect?.distanceDate === todayKey() && state.healthConnect?.todayDistanceKm > 0
+        ? ` · ${state.healthConnect.todayDistanceKm} km`
+        : '';
+    statusItems.push(`<div class="status-pill ${steps >= 8000 ? 'buff' : 'warn'}"><span>👟 ${src.toUpperCase()}</span><span>${steps.toLocaleString()}${distPart}</span></div>`);
   }
 
   if (fitCap.status === 'capped') {

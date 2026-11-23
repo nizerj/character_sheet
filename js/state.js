@@ -136,9 +136,13 @@ export function createFreshState(keepSettings = null) {
       lastSleepHours: null,
       sleepDate: null,
       todaySteps: 0,
+      stepsSource: null,
       stepsDate: null,
       stepsBonusAwardedDate: null,
+      todayDistanceKm: 0,
+      distanceDate: null,
       syncedWorkoutIds: [],
+      syncedWorkoutWindows: [],
     },
   };
 }
@@ -194,6 +198,7 @@ export function normalizeState(parsed) {
       ...fresh.healthConnect,
       ...(parsed.healthConnect || {}),
       syncedWorkoutIds: Array.isArray(parsed.healthConnect?.syncedWorkoutIds) ? parsed.healthConnect.syncedWorkoutIds : [],
+      syncedWorkoutWindows: Array.isArray(parsed.healthConnect?.syncedWorkoutWindows) ? parsed.healthConnect.syncedWorkoutWindows : [],
     },
   };
 }
