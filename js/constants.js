@@ -178,6 +178,41 @@ export function evaluateFitnessCap(heightCm, weightKg) {
   return { bmi, maxRank: 2, status: 'capped', label: 'Far outside healthy BMI — Capped at Rank 2', rangeKg };
 }
 
+// Physique Title from Muscle (FFMI) & Body Fat % — ONLY shown when Health Connect sync is active
+export function evaluatePhysiqueTitle(heightCm, weightKg, bodyFatPct, leanMassKg = null) {
+  const h = Number(heightCm) / 100;
+  const w = Number(weightKg);
+  const bf = Number(bodyFatPct);
+  if (!h || h <= 0.5 || !w || w <= 20 || !bf || bf <= 2 || bf >= 70) return null;
+
+  const lean = leanMassKg && leanMassKg > 15 ? Number(leanMassKg) : w * (1 - bf / 100);
+  const ffmi = lean / (h * h);
+
+  const muscleTier = ffmi < 18.5 ? 'low' : ffmi <= 21.0 ? 'mid' : 'high';
+  const fatTier = bf < 15 ? 'low' : bf <= 22 ? 'mid' : 'high';
+
+  const matrix = {
+    'low-low':   { title: 'Skinny',      detail: 'Low Muscle · Low Fat' },
+    'low-mid':   { title: 'Slim',        detail: 'Low Muscle · Moderate Fat' },
+    'low-high':  { title: 'Soft',        detail: 'Low Muscle · High Fat' },
+    'mid-low':   { title: 'Lean',        detail: 'Moderate Muscle · Low Fat' },
+    'mid-mid':   { title: 'Balanced',    detail: 'Moderate Muscle · Moderate Fat' },
+    'mid-high':  { title: 'Stout',       detail: 'Moderate Muscle · High Fat' },
+    'high-low':  { title: 'Shredded',    detail: 'High Muscle · Low Fat' },
+    'high-mid':  { title: 'Athletic',    detail: 'High Muscle · Moderate Fat' },
+    'high-high': { title: 'Powerlifter', detail: 'High Muscle · High Fat' },
+  };
+
+  const entry = matrix[`${muscleTier}-${fatTier}`];
+  return {
+    title: entry.title,
+    detail: entry.detail,
+    ffmi: Number(ffmi.toFixed(1)),
+    leanMassKg: Number(lean.toFixed(1)),
+    bodyFatPct: Number(bf.toFixed(1)),
+  };
+}
+
 export function getPersonaRankForXp(abilityId, xp, maxRankOverride = null) {
   const ab = ABILITIES.find(a => a.id === abilityId);
   let idx = 0;

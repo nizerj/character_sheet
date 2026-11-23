@@ -6,6 +6,7 @@ import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -33,6 +34,7 @@ class HealthConnectPlugin : Plugin() {
     private val requiredPermissions = setOf(
         HealthPermission.getReadPermission(WeightRecord::class),
         HealthPermission.getReadPermission(BodyFatRecord::class),
+        HealthPermission.getReadPermission(LeanBodyMassRecord::class),
         HealthPermission.getReadPermission(ExerciseSessionRecord::class)
     )
 
@@ -118,7 +120,7 @@ class HealthConnectPlugin : Plugin() {
                 )
                 val latestWeight = weightResp.records.maxByOrNull { it.time }
 
-                // 2. Latest Body Fat % from bioimpedance scale
+                // 2. Latest Body Fat % & Lean Body Mass from bioimpedance scale
                 val bfResp = client.readRecords(
                     ReadRecordsRequest(
                         BodyFatRecord::class,
@@ -126,6 +128,14 @@ class HealthConnectPlugin : Plugin() {
                     )
                 )
                 val latestBf = bfResp.records.maxByOrNull { it.time }
+
+                val leanResp = client.readRecords(
+                    ReadRecordsRequest(
+                        LeanBodyMassRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(startBody, now)
+                    )
+                )
+                val latestLean = leanResp.records.maxByOrNull { it.time }
 
                 // 3. Exercise Sessions (Hevy workouts, runs, etc.)
                 val exResp = client.readRecords(
@@ -153,6 +163,9 @@ class HealthConnectPlugin : Plugin() {
                 }
                 if (latestBf != null) {
                     result.put("latestBodyFatPct", latestBf.percentage.value)
+                }
+                if (latestLean != null) {
+                    result.put("latestLeanMassKg", latestLean.mass.inKilograms)
                 }
                 result.put("workouts", workoutsArr)
                 call.resolve(result)

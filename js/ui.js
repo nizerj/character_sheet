@@ -2,6 +2,7 @@ import {
   ABILITIES,
   DIFFICULTIES,
   DEFAULT_PIXEL_AVATAR,
+  evaluatePhysiqueTitle,
   getLevelInfo,
   getSkillMastery,
 } from './constants.js';
@@ -221,15 +222,32 @@ export function renderApp(state, activeTrackerTab = 'today') {
   document.getElementById('vital-weight').textContent = state.profile.weightKg ? `${state.profile.weightKg}kg` : '—';
   document.getElementById('char-goal').textContent = state.profile.goal || 'Set your main goal in Edit Profile.';
 
-  // Scientific BMI Fitness Gate (+ Bioimpedance Body Fat % if synced)
+  // Scientific BMI Fitness Gate (+ Physique Title ONLY when Health Connect sync is on)
   const bmiCard = document.getElementById('bmi-card');
   bmiCard.className = `bmi-card ${fitCap.status}`;
-  const bfText = state.healthConnect?.bodyFatPct ? ` · BF ${state.healthConnect.bodyFatPct}%` : '';
+  const hcOn = Boolean(state.healthConnect?.connected);
+  const bfText = hcOn && state.healthConnect?.bodyFatPct ? ` · BF ${state.healthConnect.bodyFatPct}%` : '';
   document.getElementById('bmi-value').textContent = (fitCap.bmi ? `BMI ${fitCap.bmi.toFixed(1)}` : 'BMI —') + bfText;
   document.getElementById('bmi-badge').textContent = `MAX FITNESS: RANK ${fitCap.maxRank}`;
   document.getElementById('bmi-desc').textContent = fitCap.rangeKg
     ? `${fitCap.label}. Healthy range for your height: ${fitCap.rangeKg}.`
     : 'Add height & weight to unlock scientific Fitness Rank 5 calibration.';
+
+  const physiqueEl = document.getElementById('physique-badge');
+  const physique = hcOn
+    ? evaluatePhysiqueTitle(
+        state.profile.heightCm,
+        state.profile.weightKg,
+        state.healthConnect?.bodyFatPct,
+        state.healthConnect?.leanMassKg
+      )
+    : null;
+  if (physique) {
+    physiqueEl.style.display = 'flex';
+    physiqueEl.innerHTML = `<span>⚡ PHYSIQUE: <strong style="color:var(--accent-gold);">${physique.title.toUpperCase()}</strong></span><span style="font-family:monospace;font-size:10.5px;color:var(--text-muted);">${physique.detail} · FFMI ${physique.ffmi}</span>`;
+  } else {
+    physiqueEl.style.display = 'none';
+  }
 
   // Active Status & Decay Warnings
   const statusList = document.getElementById('status-list');

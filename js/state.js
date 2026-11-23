@@ -90,6 +90,7 @@ export function createFreshState(keepSettings = null) {
       connected: false,
       lastSyncAt: null,
       bodyFatPct: null,
+      leanMassKg: null,
       syncedWorkoutIds: [],
     },
   };

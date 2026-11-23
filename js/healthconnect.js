@@ -78,6 +78,10 @@ export function applyHealthConnectData(state, payload) {
     state.healthConnect.bodyFatPct = Math.round(payload.latestBodyFatPct * 10) / 10;
     summary.bodyFatPct = state.healthConnect.bodyFatPct;
   }
+  if (typeof payload.latestLeanMassKg === 'number' && payload.latestLeanMassKg > 15) {
+    state.healthConnect.leanMassKg = Math.round(payload.latestLeanMassKg * 10) / 10;
+    summary.leanMassKg = state.healthConnect.leanMassKg;
+  }
 
   // 2. Hevy / Exercise Sessions
   const sessions = Array.isArray(payload.workouts) ? payload.workouts : [];
