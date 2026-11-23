@@ -11,8 +11,20 @@ import {
   getAverageRank,
   getTaskStatus,
   daysSince,
+  isWellRestedToday,
+  isFatiguedToday,
+  getTodayTrainedAbilities,
+  todayKey,
 } from './state.js';
 import { renderRadarChart } from './radar.js';
+import { ACHIEVEMENTS, getBadgeUrl, getUnlockedTitles } from './achievements.js';
+import { daysLeftLabel } from './bosses.js';
+import {
+  renderActivityHeatmap,
+  renderXpBarChart,
+  renderBodyTrendChart,
+  buildWeeklyReport,
+} from './analytics.js';
 
 export function applyVisualSettings(settings) {
   const root = document.documentElement;
@@ -222,11 +234,16 @@ export function renderApp(state, activeTrackerTab = 'today') {
   document.getElementById('vital-weight').textContent = state.profile.weightKg ? `${state.profile.weightKg}kg` : '—';
   document.getElementById('char-goal').textContent = state.profile.goal || 'Set your main goal in Edit Profile.';
 
-  // Scientific BMI Fitness Gate (+ Physique Title ONLY when Health Connect sync is on)
+  // Scientific BMI Fitness Gate (+ Physique Title ONLY when Health Connect has actual body fat data)
   const bmiCard = document.getElementById('bmi-card');
   bmiCard.className = `bmi-card ${fitCap.status}`;
   const hcOn = Boolean(state.healthConnect?.connected);
-  const bfText = hcOn && state.healthConnect?.bodyFatPct ? ` · BF ${state.healthConnect.bodyFatPct}%` : '';
+  const hcHasBody = Boolean(
+    hcOn &&
+    (state.healthConnect?.hasRealBodyData || state.healthConnect?.isSimulated) &&
+    Number(state.healthConnect?.bodyFatPct) >= 4
+  );
+  const bfText = hcHasBody ? ` · BF ${state.healthConnect.bodyFatPct}%` : '';
   document.getElementById('bmi-value').textContent = (fitCap.bmi ? `BMI ${fitCap.bmi.toFixed(1)}` : 'BMI —') + bfText;
   document.getElementById('bmi-badge').textContent = `MAX FITNESS: RANK ${fitCap.maxRank}`;
   document.getElementById('bmi-desc').textContent = fitCap.rangeKg
@@ -234,7 +251,7 @@ export function renderApp(state, activeTrackerTab = 'today') {
     : 'Add height & weight to unlock scientific Fitness Rank 5 calibration.';
 
   const physiqueEl = document.getElementById('physique-badge');
-  const physique = hcOn
+  const physique = hcHasBody
     ? evaluatePhysiqueTitle(
         state.profile.heightCm,
         state.profile.weightKg,
@@ -249,13 +266,37 @@ export function renderApp(state, activeTrackerTab = 'today') {
     physiqueEl.style.display = 'none';
   }
 
-  // Active Status & Decay Warnings
+  // Sound toggle icon
+  const soundBtn = document.getElementById('btn-toggle-sound');
+  if (soundBtn) soundBtn.textContent = state.settings.soundEnabled !== false ? '🔊' : '🔇';
+
+  // Active Status, Streaks, Combo, Sleep, Steps & Decay Warnings
   const statusList = document.getElementById('status-list');
   const statusItems = [];
-  const recentActive = ABILITIES.filter(ab => state.abilities[ab.id].xp > 0 && daysSince(state.abilities[ab.id].lastActivity) <= 2).length;
-  if (recentActive >= 2) {
-    statusItems.push(`<div class="status-pill buff"><span>▲ MOMENTUM (${recentActive}/5)</span><span>ACTIVE</span></div>`);
+
+  const streak = state.stats?.currentStreak || 0;
+  if (streak >= 1) {
+    statusItems.push(`<div class="status-pill buff"><span>🔥 ${streak}-DAY STREAK</span><span>BEST: ${state.stats?.bestStreak || streak}d</span></div>`);
   }
+
+  const todayAbs = getTodayTrainedAbilities(state);
+  if (todayAbs.size >= 3) {
+    statusItems.push(`<div class="status-pill buff"><span>⚡ BALANCED DAY COMBO</span><span>${todayAbs.size}/5 STATS</span></div>`);
+  } else if (todayAbs.size > 0) {
+    statusItems.push(`<div class="status-pill warn"><span>⚡ COMBO PROGRESS</span><span>${todayAbs.size}/3 STATS TODAY</span></div>`);
+  }
+
+  if (isWellRestedToday(state)) {
+    statusItems.push(`<div class="status-pill buff"><span>🌙 WELL-RESTED (${state.healthConnect.lastSleepHours}h)</span><span>+10% XP</span></div>`);
+  } else if (isFatiguedToday(state)) {
+    statusItems.push(`<div class="status-pill debuff"><span>😵 FATIGUED (${state.healthConnect.lastSleepHours}h sleep)</span><span>REST UP</span></div>`);
+  }
+
+  if (hcOn && state.healthConnect?.stepsDate === todayKey() && state.healthConnect?.todaySteps > 0) {
+    const steps = state.healthConnect.todaySteps;
+    statusItems.push(`<div class="status-pill ${steps >= 8000 ? 'buff' : 'warn'}"><span>👟 TODAY'S STEPS</span><span>${steps.toLocaleString()}</span></div>`);
+  }
+
   if (fitCap.status === 'capped') {
     statusItems.push(`<div class="status-pill warn"><span>⚠ FITNESS CAP (RANK ${fitCap.maxRank})</span><span>BMI ${fitCap.bmi.toFixed(1)}</span></div>`);
   }
@@ -315,19 +356,37 @@ export function renderApp(state, activeTrackerTab = 'today') {
         const iconMarkup = sk.iconImage
           ? `<img src="${sk.iconImage}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/>`
           : sk.icon || '✦';
+        let msHtml = '';
+        if (sk.milestone && sk.milestone.target > 0) {
+          const cur = Number(sk.milestone.current) || 0;
+          const tgt = Number(sk.milestone.target);
+          const pct = Math.min(100, Math.round((cur / tgt) * 100));
+          const stepInc = tgt >= 100 ? 10 : 1;
+          msHtml = `
+            <div class="skill-milestone-row">
+              <span style="color:var(--text-muted);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(sk.milestone.label || '')}">${escapeHtml(sk.milestone.label || 'Milestone')}</span>
+              <div class="ms-track"><div class="ms-fill" style="width:${pct}%"></div></div>
+              <span style="font-family:monospace;color:var(--accent-gold);font-weight:800;white-space:nowrap;">${cur}/${tgt} ${escapeHtml(sk.milestone.unit || '')}</span>
+              ${cur < tgt ? `<button class="btn btn-sm btn-gold" data-ms-inc="${sk.id}" data-ms-step="${stepInc}" style="padding:2px 7px;font-size:10px;">+${stepInc}</button>` : `<span style="color:var(--accent-emerald);font-weight:900;">✓</span>`}
+            </div>
+          `;
+        }
         return `
-          <div class="skill-item" data-edit-skill="${sk.id}" title="Right-click or long-press to edit">
-            <div class="skill-left">
-              <div class="skill-icon" style="overflow:hidden;">${iconMarkup}</div>
-              <div style="min-width:0">
-                <div class="skill-name">${escapeHtml(sk.name)}</div>
-                <div class="skill-sub">${abLabel} · ${sk.xp} XP (${m.stars.toFixed(1)}/5)</div>
+          <div class="skill-item-wrap" data-edit-skill="${sk.id}" title="Right-click or long-press to edit">
+            <div class="skill-top-row">
+              <div class="skill-left">
+                <div class="skill-icon" style="overflow:hidden;">${iconMarkup}</div>
+                <div style="min-width:0">
+                  <div class="skill-name">${escapeHtml(sk.name)}</div>
+                  <div class="skill-sub">${abLabel} · ${sk.xp} XP (${m.stars.toFixed(1)}/5)</div>
+                </div>
+              </div>
+              <div class="skill-right">
+                <div class="mastery-glyphs" title="${m.stars.toFixed(1)} / 5.0 · Next step at ${m.nextXp} XP">${glyphs}</div>
+                <button class="skill-del" data-delete-skill="${sk.id}" title="Remove skill">✕</button>
               </div>
             </div>
-            <div class="skill-right">
-              <div class="mastery-glyphs" title="${m.stars.toFixed(1)} / 5.0 · Next step at ${m.nextXp} XP">${glyphs}</div>
-              <button class="skill-del" data-delete-skill="${sk.id}" title="Remove skill">✕</button>
-            </div>
+            ${msHtml}
           </div>
         `;
       })
@@ -410,4 +469,173 @@ export function renderApp(state, activeTrackerTab = 'today') {
   } else {
     listEl.innerHTML = filteredTasks.map(t => renderTaskCard(t, state)).join('');
   }
+}
+
+// =========================================================================
+// BOSS FIGHTS PAGE RENDERER
+// =========================================================================
+export function renderBossesPage(state) {
+  const grid = document.getElementById('boss-grid');
+  const bosses = state.bosses || [];
+  if (bosses.length === 0) {
+    grid.innerHTML = `<div class="card empty-state" style="grid-column:1/-1;">No active Boss Fights. Click <strong>+ Summon Boss</strong> to turn an exam, big project, or deadline into a Boss with an HP bar!</div>`;
+    return;
+  }
+
+  grid.innerHTML = bosses
+    .map(b => {
+      const pct = Math.max(0, Math.round((b.hp / Math.max(1, b.maxHp)) * 100));
+      const abLabel = ABILITIES.find(a => a.id === b.abilityId)?.label || b.abilityId;
+      const sk = b.skillId ? state.skills.find(s => s.id === b.skillId) : null;
+      const deadlineText = b.status === 'active' ? daysLeftLabel(b.deadline) : b.status === 'defeated' ? 'DEFEATED ✓' : 'FAILED ✕';
+
+      const stepsHtml = (b.steps || []).length
+        ? `<div class="boss-steps">${b.steps
+            .map(
+              st => `
+            <div class="boss-step ${st.done ? 'done' : ''}">
+              <button class="btn btn-sm ${st.done ? '' : 'btn-danger'}" data-boss-step="${b.id}|${st.id}" ${st.done || b.status !== 'active' ? 'disabled' : ''} style="padding:2px 7px;">${st.done ? '✓' : '⚔'}</button>
+              <span>${escapeHtml(st.label)}</span>
+            </div>`
+            )
+            .join('')}</div>`
+        : '';
+
+      return `
+        <div class="boss-card ${b.status}">
+          <div class="task-top">
+            <div>
+              <div style="font-size:16px;font-weight:900;color:var(--text-bright);">⚔️ ${escapeHtml(b.title)}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                ${abLabel}${sk ? ` · ${escapeHtml(sk.name)}` : ''} · Reward: <strong style="color:var(--accent-gold);">+${b.rewardXp} XP</strong>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span class="tag ${b.status === 'defeated' ? 'tag-due' : 'tag-overdue'}">${deadlineText}</span>
+              <button class="skill-del" data-delete-boss="${b.id}" title="Delete Boss">✕</button>
+            </div>
+          </div>
+
+          <div class="boss-hp-track"><div class="boss-hp-fill" style="width:${pct}%"></div></div>
+          <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;color:var(--text-muted);">
+            <span>HP: <strong style="color:var(--text-bright);">${b.hp} / ${b.maxHp}</strong> (${pct}%)</span>
+            <span>Due: ${b.deadline}</span>
+          </div>
+
+          ${stepsHtml}
+
+          ${
+            b.status === 'active'
+              ? `<div style="display:flex;gap:8px;margin-top:10px;">
+                  <button class="btn btn-sm btn-danger" data-boss-strike="${b.id}|60">⚔ Strike (−60 HP)</button>
+                  <button class="btn btn-sm btn-gold" data-boss-strike="${b.id}|150">⚡ Heavy Strike (−150 HP)</button>
+                </div>`
+              : ''
+          }
+        </div>
+      `;
+    })
+    .join('');
+}
+
+// =========================================================================
+// TROPHIES / ACHIEVEMENTS PAGE RENDERER (61 PIXEL BADGES)
+// =========================================================================
+export function renderTrophiesPage(state, category = 'All') {
+  const unlockedMap = state.achievements?.unlocked || {};
+  const unlockedCount = Object.keys(unlockedMap).length;
+  document.getElementById('ach-progress-label').textContent = `${unlockedCount} / ${ACHIEVEMENTS.length} UNLOCKED`;
+
+  // Equippable Titles Bar
+  const titles = getUnlockedTitles(state);
+  const titleBar = document.getElementById('unlocked-titles-bar');
+  if (titles.length > 0) {
+    titleBar.style.display = 'block';
+    titleBar.innerHTML = `
+      <div style="font-size:10.5px;font-weight:800;color:var(--accent-gold);text-transform:uppercase;margin-bottom:6px;">Unlocked Equippable Titles (Click to Equip)</div>
+      <div class="chip-selector">
+        <button class="chip-option ${!state.profile.customClass ? 'selected' : ''}" data-equip-title="">Auto Level Title</button>
+        ${titles
+          .map(
+            t =>
+              `<button class="chip-option ${state.profile.customClass === t.title ? 'selected-gold' : ''}" data-equip-title="${escapeHtml(t.title)}">★ ${escapeHtml(t.title)}</button>`
+          )
+          .join('')}
+      </div>
+    `;
+  } else {
+    titleBar.style.display = 'none';
+  }
+
+  // Category Filters
+  const cats = ['All', 'Unlocked', ...new Set(ACHIEVEMENTS.map(a => a.cat))];
+  document.getElementById('ach-filters').innerHTML = cats
+    .map(c => `<button class="btn btn-sm ${c === category ? 'btn-gold' : ''}" data-ach-cat="${c}">${c}</button>`)
+    .join('');
+
+  const filtered = ACHIEVEMENTS.filter(a => {
+    if (category === 'All') return true;
+    if (category === 'Unlocked') return Boolean(unlockedMap[a.id]);
+    return a.cat === category;
+  });
+
+  document.getElementById('ach-grid').innerHTML = filtered
+    .map(a => {
+      const isUnlocked = Boolean(unlockedMap[a.id]);
+      return `
+        <div class="ach-card ${isUnlocked ? 'unlocked' : 'locked'}">
+          <img class="ach-badge" src="${getBadgeUrl(a.id)}" alt="${escapeHtml(a.name)}" loading="lazy" />
+          <div style="min-width:0;">
+            <div class="ach-name">${escapeHtml(a.name)}</div>
+            <div class="ach-desc">${escapeHtml(a.desc)}</div>
+            ${a.titleReward ? `<span class="ach-reward">Title: ${escapeHtml(a.titleReward)}</span>` : ''}
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+// =========================================================================
+// STATS & ANALYTICS PAGE RENDERER
+// =========================================================================
+export function renderStatsPage(state) {
+  const st = state.stats || {};
+  const focusHrs = ((st.totalFocusMinutes || 0) / 60).toFixed(1);
+  const unlockedCount = Object.keys(state.achievements?.unlocked || {}).length;
+
+  document.getElementById('stats-summary-row').innerHTML = `
+    <div class="vital-box"><div class="vital-label">Current Streak</div><div class="vital-value" style="color:var(--accent-gold);">🔥 ${st.currentStreak || 0}d</div></div>
+    <div class="vital-box"><div class="vital-label">Focus Time</div><div class="vital-value">⏱ ${focusHrs}h</div></div>
+    <div class="vital-box"><div class="vital-label">Bosses Slain</div><div class="vital-value" style="color:var(--accent-danger);">⚔️ ${st.bossesDefeated || 0}</div></div>
+    <div class="vital-box"><div class="vital-label">Trophies</div><div class="vital-value" style="color:var(--accent-emerald);">★ ${unlockedCount}/${ACHIEVEMENTS.length}</div></div>
+  `;
+
+  renderActivityHeatmap(document.getElementById('stats-heatmap'), state);
+  renderXpBarChart(document.getElementById('stats-xp-chart'), state);
+  renderBodyTrendChart(document.getElementById('stats-body-chart'), state);
+
+  const rep = buildWeeklyReport(state, false);
+  document.getElementById('stats-week-preview').innerHTML = renderReportMarkup(rep);
+}
+
+export function renderReportMarkup(rep) {
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;padding:12px;background:var(--bg-input);border-left:4px solid var(--accent-gold);">
+      <div>
+        <div style="font-size:10.5px;color:var(--text-muted);font-family:monospace;text-transform:uppercase;">WEEK ${rep.rangeLabel}</div>
+        <div style="font-size:18px;font-weight:900;color:var(--text-bright);margin-top:2px;">Net ${rep.netXp >= 0 ? '+' : ''}${rep.netXp} XP</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">${rep.tasksDone} tasks done · ${rep.penaltiesCount} setbacks</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:9.5px;color:var(--text-muted);font-weight:800;">GRADE</div>
+        <div class="report-grade">${rep.grade}</div>
+      </div>
+    </div>
+    <div class="vitals-grid" style="margin-bottom:0;">
+      <div class="vital-box"><div class="vital-label">Strongest</div><div class="vital-value" style="font-size:12px;color:var(--accent-emerald);">${rep.strongest.label} (+${rep.strongest.xp})</div></div>
+      <div class="vital-box"><div class="vital-label">Neglected</div><div class="vital-value" style="font-size:12px;color:var(--accent-danger);">${rep.neglected.label} (+${rep.neglected.xp})</div></div>
+      <div class="vital-box"><div class="vital-label">Goalposts</div><div class="vital-value" style="font-size:12px;">${rep.goalpostsHit} / ${rep.goalpostsTotal}</div></div>
+    </div>
+  `;
 }

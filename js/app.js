@@ -16,9 +16,21 @@ import {
   deleteLogEntry,
   logPenalty,
   runAutoDecayCheck,
+  recordBodySnapshot,
+  incrementSkillMilestone,
+  recordFocusSession,
   todayKey,
+  addDaysKey,
+  getWeekStartKey,
 } from './state.js';
-import { renderApp, showToast } from './ui.js';
+import {
+  renderApp,
+  renderBossesPage,
+  renderTrophiesPage,
+  renderStatsPage,
+  renderReportMarkup,
+  showToast,
+} from './ui.js';
 import {
   downloadJsonBackup,
   encodeBackupCode,
@@ -33,17 +45,44 @@ import {
   requestHealthConnectPermissions,
   syncHealthConnect,
   applyHealthConnectData,
+  disconnectHealthConnect,
 } from './healthconnect.js';
+import { evaluateAchievements, getBadgeUrl } from './achievements.js';
+import {
+  BOSS_TIERS,
+  createBoss,
+  damageBoss,
+  toggleBossStep,
+  applyTaskDamageToMatchingBosses,
+  checkExpiredBosses,
+  deleteBoss,
+} from './bosses.js';
+import {
+  configureTimer,
+  startTimer,
+  pauseTimer,
+  stopTimer,
+  finishTimer,
+  getTimerState,
+  formatTime,
+} from './timer.js';
+import { buildWeeklyReport } from './analytics.js';
+import { sfx, setAudioMuted, showCutIn } from './audio.js';
+import { configureDailyReminder } from './notifications.js';
 
 let state = loadState();
 let activeTrackerTab = 'today';
 let activePage = 'status';
+let activeAchCategory = 'All';
+let reviewPrevWeek = false;
 let pendingAvatarDataUrl = undefined;
 let editingSkillId = null;
-let pendingSkillImage = undefined; // undefined = unchanged, null = clear, string = new 64x64 dataUrl
+let pendingSkillImage = undefined;
 let wizStep = 1;
 let wizPhotoDataUrl = null;
-let wizSkills = []; // [{name, icon, linkedAbility}]
+let wizSkills = [];
+
+setAudioMuted(state.settings?.soundEnabled === false);
 
 function openModal(id) {
   document.getElementById(id).classList.add('open');
@@ -51,10 +90,61 @@ function openModal(id) {
 
 function closeAllModals() {
   document.querySelectorAll('.modal-backdrop.open').forEach(el => {
-    // Don't allow closing mandatory first-time setup before completion
     if (el.id === 'modal-setup' && !state.setupCompleted) return;
     el.classList.remove('open');
   });
+}
+
+function refreshCurrentView() {
+  renderApp(state, activeTrackerTab);
+  if (activePage === 'bosses') renderBossesPage(state);
+  else if (activePage === 'trophies') renderTrophiesPage(state, activeAchCategory);
+  else if (activePage === 'stats') renderStatsPage(state);
+  else if (activePage === 'config') populateConfigPage();
+}
+
+function checkAchievementsAndNotify() {
+  const unlocked = evaluateAchievements(state);
+  unlocked.forEach((ach, i) => {
+    setTimeout(() => {
+      sfx.achievement();
+      showCutIn({
+        kicker: 'ACHIEVEMENT UNLOCKED',
+        title: ach.name,
+        subtitle: ach.titleReward ? `${ach.desc} · Title Unlocked: "${ach.titleReward}"` : ach.desc,
+        variant: 'gold',
+        badgeUrl: getBadgeUrl(ach.id),
+      });
+    }, i * 300);
+  });
+  if (unlocked.length > 0 && activePage === 'trophies') {
+    renderTrophiesPage(state, activeAchCategory);
+  }
+}
+
+function handleXpCelebration(res, label) {
+  if (res.balancedComboTriggered) {
+    showToast(`⚡ BALANCED DAY COMBO! +${res.comboBonus} Bonus XP!`);
+  }
+  if (res.leveledUp) {
+    sfx.levelUp();
+    showCutIn({
+      kicker: 'LEVEL UP',
+      title: `LV. ${res.newLevel}`,
+      subtitle: label || 'Your potential expands!',
+      variant: 'gold',
+    });
+  }
+  if (res.rankUps && res.rankUps.length > 0) {
+    sfx.rankUp();
+    showCutIn({
+      kicker: 'RANK UP',
+      title: res.rankUps[0],
+      subtitle: res.rankUps.slice(1).join(' · ') || 'New stat tier reached!',
+      variant: 'gold',
+    });
+  }
+  checkAchievementsAndNotify();
 }
 
 function compressImageFile(file, maxSize = 320, quality = 0.85) {
@@ -76,6 +166,22 @@ function compressImageFile(file, maxSize = 320, quality = 0.85) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// =========================================================================
+// PAGE SWITCHING
+// =========================================================================
+function switchPage(page) {
+  activePage = page;
+  ['status', 'bosses', 'trophies', 'stats', 'config'].forEach(p => {
+    const el = document.getElementById(`view-${p}`);
+    if (!el) return;
+    if (p === page) el.style.display = p === 'status' ? 'grid' : 'block';
+    else el.style.display = 'none';
+  });
+  document.querySelectorAll('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  sfx.click();
+  refreshCurrentView();
 }
 
 // =========================================================================
@@ -111,9 +217,7 @@ function renderWizSkills() {
 }
 
 function openSetupWizard(tutorialOnly = false) {
-  const closeBtn = document.getElementById('btn-close-setup');
-  closeBtn.style.display = state.setupCompleted ? 'inline-block' : 'none';
-
+  document.getElementById('btn-close-setup').style.display = state.setupCompleted ? 'inline-block' : 'none';
   document.getElementById('wiz-custom-skill-ab').innerHTML = ABILITIES.map(
     ab => `<option value="${ab.id}">${ab.label}</option>`
   ).join('');
@@ -139,7 +243,7 @@ function openSetupWizard(tutorialOnly = false) {
 }
 
 // =========================================================================
-// POPULATE MODALS
+// POPULATE MODALS & CONFIG
 // =========================================================================
 function updateRecurrenceBoxes() {
   const mode = document.getElementById('task-recurrence').value;
@@ -162,20 +266,15 @@ function populateTaskModal() {
   document.getElementById('task-weekday-chips').innerHTML = WEEKDAYS.map(
     w => `<button type="button" class="chip-option" data-weekday="${w.idx}">${w.short}</button>`
   ).join('');
-
   document.getElementById('task-ability-chips').innerHTML = ABILITIES.map(
     ab => `<button type="button" class="chip-option" data-ability="${ab.id}">${ab.label}</button>`
   ).join('');
 
   const skWrap = document.getElementById('task-skill-chips');
-  if (state.skills.length === 0) {
-    skWrap.innerHTML = `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`;
-  } else {
-    skWrap.innerHTML = state.skills
-      .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}">${sk.icon || '✦'} ${sk.name}</button>`)
-      .join('');
-  }
-
+  skWrap.innerHTML =
+    state.skills.length === 0
+      ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
+      : state.skills.map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}">${sk.icon || '✦'} ${sk.name}</button>`).join('');
   updateRecurrenceBoxes();
 }
 
@@ -191,9 +290,7 @@ function populatePenaltyModal() {
   skWrap.innerHTML =
     state.skills.length === 0
       ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
-      : state.skills
-          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}">${sk.icon || '✦'} ${sk.name}</button>`)
-          .join('');
+      : state.skills.map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}">${sk.icon || '✦'} ${sk.name}</button>`).join('');
 }
 
 function renderSkillImgPreview(dataUrl) {
@@ -222,14 +319,57 @@ function populateSkillModal(skillId = null) {
     document.getElementById('skill-name').value = sk.name;
     document.getElementById('skill-icon').value = sk.icon || '✦';
     document.getElementById('skill-ability').value = sk.linkedAbility || 'productivity';
+    document.getElementById('skill-ms-label').value = sk.milestone?.label || '';
+    document.getElementById('skill-ms-current').value = sk.milestone?.current ?? '';
+    document.getElementById('skill-ms-target').value = sk.milestone?.target ?? '';
+    document.getElementById('skill-ms-unit').value = sk.milestone?.unit || '';
     renderSkillImgPreview(sk.iconImage || null);
   } else {
     document.getElementById('skill-modal-title').textContent = '+ Add Skill';
     document.getElementById('btn-skill-submit').textContent = 'Add Skill';
     document.getElementById('skill-name').value = '';
     document.getElementById('skill-icon').value = '✦';
+    document.getElementById('skill-ms-label').value = '';
+    document.getElementById('skill-ms-current').value = '';
+    document.getElementById('skill-ms-target').value = '';
+    document.getElementById('skill-ms-unit').value = '';
     renderSkillImgPreview(null);
   }
+}
+
+function populateBossModal() {
+  document.getElementById('boss-title').value = '';
+  document.getElementById('boss-tier').innerHTML = BOSS_TIERS.map(
+    t => `<option value="${t.id}" ${t.id === 'boss' ? 'selected' : ''}>${t.label}</option>`
+  ).join('');
+  document.getElementById('boss-deadline').value = addDaysKey(todayKey(), 14);
+  document.getElementById('boss-ability').innerHTML = ABILITIES.map(
+    a => `<option value="${a.id}">${a.label}</option>`
+  ).join('');
+  document.getElementById('boss-skill').innerHTML =
+    `<option value="">— None —</option>` +
+    state.skills.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  document.getElementById('boss-steps').value = '';
+}
+
+function populateTimerModal() {
+  document.getElementById('timer-ability').innerHTML = ABILITIES.map(
+    a => `<option value="${a.id}">${a.label}</option>`
+  ).join('');
+  document.getElementById('timer-skill').innerHTML =
+    `<option value="">— None —</option>` +
+    state.skills.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  updateTimerUI(getTimerState());
+}
+
+function updateTimerUI(ts) {
+  const formatted = formatTime(ts.remainingSeconds);
+  document.getElementById('timer-modal-clock').textContent = formatted;
+  document.getElementById('timer-float-clock').textContent = formatted;
+  document.getElementById('timer-float-label').textContent = ts.config.label || 'Focus';
+  document.getElementById('btn-timer-start').textContent = ts.running ? '⏸ Pause' : '▶ Start';
+  const modalOpen = document.getElementById('modal-timer').classList.contains('open');
+  document.getElementById('timer-float').classList.toggle('visible', ts.running && !modalOpen);
 }
 
 function populateProfileModal() {
@@ -262,8 +402,7 @@ function populateConfigPage() {
     `;
   }).join('');
 
-  const trackSel = document.getElementById('config-title-track');
-  trackSel.innerHTML = Object.values(TITLE_TRACKS)
+  document.getElementById('config-title-track').innerHTML = Object.values(TITLE_TRACKS)
     .map(tr => `<option value="${tr.id}" ${(state.settings.titleTrack || 'arcana') === tr.id ? 'selected' : ''}>${tr.label}</option>`)
     .join('');
 
@@ -272,6 +411,9 @@ function populateConfigPage() {
   document.getElementById('color-gold').value = toHex(state.settings.customColors.gold || styles.getPropertyValue('--accent-gold').trim(), '#f5c542');
   document.getElementById('color-radar').value = toHex(state.settings.customColors.radar || styles.getPropertyValue('--radar-stroke').trim(), '#a5b4fc');
   document.getElementById('setting-auto-decay').checked = Boolean(state.settings.autoDecayEnabled);
+  document.getElementById('setting-sound').checked = state.settings.soundEnabled !== false;
+  document.getElementById('setting-reminder').checked = Boolean(state.settings.reminderEnabled);
+  document.getElementById('setting-reminder-time').value = state.settings.reminderTime || '20:00';
 
   document.getElementById('grace-days-grid').innerHTML = ABILITIES.map(ab => {
     const val = state.settings.graceDays[ab.id] ?? ab.defaultGraceDays;
@@ -291,21 +433,21 @@ function populateConfigPage() {
     : 'No backup yet';
 
   const hcLabel = document.getElementById('hc-status-label');
-  if (state.healthConnect?.lastSyncAt) {
-    hcLabel.textContent = `Synced: ${new Date(state.healthConnect.lastSyncAt).toLocaleTimeString()}`;
+  if (state.healthConnect?.connected && state.healthConnect?.lastSyncAt) {
+    const modeTag = state.healthConnect.isSimulated ? 'Test Mode' : 'Live Synced';
+    hcLabel.textContent = `${modeTag}: ${new Date(state.healthConnect.lastSyncAt).toLocaleTimeString()}`;
   } else if (isNativeAndroid()) {
-    hcLabel.textContent = 'Android Ready';
+    hcLabel.textContent = 'Android Ready (Not Connected)';
   } else {
     hcLabel.textContent = 'Android APK Only (Test Mode on PC)';
   }
 }
 
-function switchPage(page) {
-  activePage = page;
-  document.getElementById('view-status').style.display = page === 'status' ? 'grid' : 'none';
-  document.getElementById('view-config').style.display = page === 'config' ? 'block' : 'none';
-  document.querySelectorAll('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === page));
-  if (page === 'config') populateConfigPage();
+function openReviewModal(prevWeek = false) {
+  reviewPrevWeek = prevWeek;
+  const rep = buildWeeklyReport(state, reviewPrevWeek);
+  document.getElementById('review-modal-body').innerHTML = renderReportMarkup(rep);
+  openModal('modal-review');
 }
 
 // =========================================================================
@@ -322,21 +464,111 @@ function bindEvents() {
   document.getElementById('btn-open-profile').addEventListener('click', openProfile);
   document.getElementById('avatar-container').addEventListener('click', openProfile);
   document.getElementById('btn-open-skill').addEventListener('click', () => { populateSkillModal(); openModal('modal-skill'); });
+  document.getElementById('btn-open-boss').addEventListener('click', () => { populateBossModal(); openModal('modal-boss'); });
+  document.getElementById('btn-open-timer').addEventListener('click', () => { populateTimerModal(); openModal('modal-timer'); });
+  document.getElementById('btn-float-open').addEventListener('click', () => { populateTimerModal(); openModal('modal-timer'); });
+  document.getElementById('btn-open-review').addEventListener('click', () => openReviewModal(false));
+  document.getElementById('btn-review-toggle-week').addEventListener('click', () => openReviewModal(!reviewPrevWeek));
   document.getElementById('btn-open-tutorial').addEventListener('click', () => openSetupWizard(true));
+
+  document.getElementById('btn-toggle-sound').addEventListener('click', () => {
+    state.settings.soundEnabled = state.settings.soundEnabled === false;
+    setAudioMuted(!state.settings.soundEnabled);
+    saveState(state);
+    refreshCurrentView();
+    if (state.settings.soundEnabled) sfx.click();
+  });
 
   document.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => switchPage(btn.dataset.page));
   });
 
-  document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', closeAllModals));
+  document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', () => {
+    closeAllModals();
+    updateTimerUI(getTimerState());
+  }));
   document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
-    backdrop.addEventListener('click', e => { if (e.target === backdrop) closeAllModals(); });
+    backdrop.addEventListener('click', e => {
+      if (e.target === backdrop) {
+        closeAllModals();
+        updateTimerUI(getTimerState());
+      }
+    });
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAllModals(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      closeAllModals();
+      updateTimerUI(getTimerState());
+    }
+  });
 
   document.getElementById('task-recurrence').addEventListener('change', updateRecurrenceBoxes);
 
-  // Wizard Restore Backup Account (skips tutorial on new browser/device)
+  // --- FOCUS TIMER CONTROLS ---
+  document.querySelectorAll('[data-timer-preset]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const m = Number(btn.dataset.timerPreset);
+      document.getElementById('timer-minutes').value = m;
+      configureTimer({
+        minutes: m,
+        label: document.getElementById('timer-label').value.trim() || 'Deep Focus',
+        abilityId: document.getElementById('timer-ability').value,
+        skillId: document.getElementById('timer-skill').value,
+      });
+      updateTimerUI(getTimerState());
+    });
+  });
+
+  const onTimerDone = info => {
+    sfx.timerDone();
+    const res = recordFocusSession(state, info);
+    const hits = applyTaskDamageToMatchingBosses(state, [info.abilityId], info.skillId ? [info.skillId] : [], res.gainedTotalXp);
+    refreshCurrentView();
+    showToast(`⏱ Focus Complete (${info.minutesCompleted}m)! +${res.gainedTotalXp} XP`);
+    hits.forEach(h => {
+      if (h.defeated) {
+        sfx.bossWin();
+        showCutIn({ kicker: 'BOSS DEFEATED!', title: h.boss.title, subtitle: `+${h.rewardXp} Bonus XP`, variant: 'gold' });
+      }
+    });
+    handleXpCelebration(res, 'Deep Focus Complete');
+  };
+
+  document.getElementById('btn-timer-start').addEventListener('click', () => {
+    const ts = getTimerState();
+    if (ts.running) {
+      pauseTimer();
+      updateTimerUI(getTimerState());
+    } else {
+      if (ts.remainingSeconds === ts.totalSeconds) {
+        configureTimer({
+          minutes: Number(document.getElementById('timer-minutes').value) || 25,
+          label: document.getElementById('timer-label').value.trim() || 'Deep Focus',
+          abilityId: document.getElementById('timer-ability').value,
+          skillId: document.getElementById('timer-skill').value,
+        });
+      }
+      sfx.click();
+      startTimer(updateTimerUI, onTimerDone);
+    }
+  });
+
+  document.getElementById('btn-timer-stop').addEventListener('click', () => {
+    stopTimer();
+    updateTimerUI(getTimerState());
+  });
+
+  document.getElementById('btn-timer-finish-early').addEventListener('click', () => {
+    const ts = getTimerState();
+    if (ts.remainingSeconds === ts.totalSeconds) {
+      showToast('Start the timer first!', 'danger');
+      return;
+    }
+    finishTimer(false);
+    closeAllModals();
+  });
+
+  // --- WIZARD RESTORE & NAVIGATION ---
   document.getElementById('btn-wiz-toggle-restore').addEventListener('click', () => {
     const panel = document.getElementById('wiz-restore-panel');
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
@@ -354,7 +586,7 @@ function bindEvents() {
         state = parsed;
         saveState(state);
         document.getElementById('modal-setup').classList.remove('open');
-        renderApp(state, activeTrackerTab);
+        refreshCurrentView();
         showToast(`Welcome back, ${state.profile.name || 'Player'}! Backup restored.`);
       } catch {
         showToast('Invalid JSON backup file.', 'danger');
@@ -373,20 +605,15 @@ function bindEvents() {
       saveState(state);
       document.getElementById('wiz-restore-code').value = '';
       document.getElementById('modal-setup').classList.remove('open');
-      renderApp(state, activeTrackerTab);
+      refreshCurrentView();
       showToast(`Welcome back, ${state.profile.name || 'Player'}! Backup restored.`);
     } catch {
       showToast('Invalid backup code.', 'danger');
     }
   });
 
-  // Wizard Navigation & Controls
-  document.getElementById('btn-wiz-next').addEventListener('click', () => {
-    if (wizStep < 3) setWizardStep(wizStep + 1);
-  });
-  document.getElementById('btn-wiz-back').addEventListener('click', () => {
-    if (wizStep > 1) setWizardStep(wizStep - 1);
-  });
+  document.getElementById('btn-wiz-next').addEventListener('click', () => { if (wizStep < 3) setWizardStep(wizStep + 1); });
+  document.getElementById('btn-wiz-back').addEventListener('click', () => { if (wizStep > 1) setWizardStep(wizStep - 1); });
 
   document.getElementById('wiz-photo-input').addEventListener('change', async e => {
     const file = e.target.files?.[0];
@@ -419,6 +646,7 @@ function bindEvents() {
       state.profile.goal = document.getElementById('wiz-goal').value.trim() || 'Level up every day.';
       state.profile.pixelateAvatar = document.getElementById('wiz-pixelate').checked;
       if (wizPhotoDataUrl) state.profile.avatarDataUrl = wizPhotoDataUrl;
+      if (state.profile.weightKg) recordBodySnapshot(state);
 
       wizSkills.forEach((s, idx) => {
         state.skills.push({
@@ -432,34 +660,28 @@ function bindEvents() {
 
       state.setupCompleted = true;
       saveState(state);
-      renderApp(state, activeTrackerTab);
+      refreshCurrentView();
+      checkAchievementsAndNotify();
       showToast(`Welcome, ${state.profile.name}! You start at LV.1 · Rank 1.`);
     }
     document.getElementById('modal-setup').classList.remove('open');
   });
 
-  // Global delegated clicks
+  // --- GLOBAL DELEGATED CLICKS ---
   document.body.addEventListener('click', e => {
-    // Wizard skill preset toggle
     const presetBtn = e.target.closest('[data-preset-skill]');
     if (presetBtn) {
       const [name, icon, linkedAbility] = presetBtn.dataset.presetSkill.split('|');
-      const existsIdx = wizSkills.findIndex(s => s.name === name);
-      if (existsIdx >= 0) {
-        wizSkills.splice(existsIdx, 1);
-        presetBtn.classList.remove('selected-gold');
-      } else {
-        wizSkills.push({ name, icon, linkedAbility });
-        presetBtn.classList.add('selected-gold');
-      }
+      const idx = wizSkills.findIndex(s => s.name === name);
+      if (idx >= 0) { wizSkills.splice(idx, 1); presetBtn.classList.remove('selected-gold'); }
+      else { wizSkills.push({ name, icon, linkedAbility }); presetBtn.classList.add('selected-gold'); }
       renderWizSkills();
       return;
     }
 
     const wizRem = e.target.closest('[data-wiz-rem-skill]');
     if (wizRem) {
-      const idx = Number(wizRem.dataset.wizRemSkill);
-      const removed = wizSkills.splice(idx, 1)[0];
+      const removed = wizSkills.splice(Number(wizRem.dataset.wizRemSkill), 1)[0];
       if (removed) {
         document.querySelectorAll('#wiz-skill-presets .chip-option').forEach(c => {
           if (c.dataset.presetSkill.startsWith(removed.name + '|')) c.classList.remove('selected-gold');
@@ -469,7 +691,6 @@ function bindEvents() {
       return;
     }
 
-    // Weekday presets in New Task modal
     const dayPreset = e.target.closest('[data-day-preset]');
     if (dayPreset) {
       const p = dayPreset.dataset.dayPreset;
@@ -480,9 +701,93 @@ function bindEvents() {
       return;
     }
 
+    // Equip unlocked achievement title
+    const equipBtn = e.target.closest('[data-equip-title]');
+    if (equipBtn) {
+      state.profile.customClass = equipBtn.dataset.equipTitle;
+      saveState(state);
+      sfx.click();
+      refreshCurrentView();
+      showToast(state.profile.customClass ? `Equipped title: "${state.profile.customClass}"` : 'Switched back to Auto Level Title');
+      return;
+    }
+
+    // Achievement category filter
+    const achCatBtn = e.target.closest('[data-ach-cat]');
+    if (achCatBtn) {
+      activeAchCategory = achCatBtn.dataset.achCat;
+      renderTrophiesPage(state, activeAchCategory);
+      return;
+    }
+
+    // Skill Milestone +Step increment
+    const msBtn = e.target.closest('[data-ms-inc]');
+    if (msBtn) {
+      const res = incrementSkillMilestone(state, msBtn.dataset.msInc, Number(msBtn.dataset.msStep) || 1);
+      if (res) {
+        sfx.taskDone();
+        refreshCurrentView();
+        showToast(
+          res.justCompleted
+            ? `✦ MILESTONE COMPLETE! ${res.skillName} (${res.current}/${res.target}) · +${res.gainedTotalXp} XP!`
+            : `${res.skillName} progress: ${res.current}/${res.target} (+${res.gainedTotalXp} XP)`
+        );
+        handleXpCelebration(res, res.skillName);
+      }
+      return;
+    }
+
+    // Boss Step Strike
+    const bossStepBtn = e.target.closest('[data-boss-step]');
+    if (bossStepBtn) {
+      const [bossId, stepId] = bossStepBtn.dataset.bossStep.split('|');
+      const res = toggleBossStep(state, bossId, stepId);
+      if (res) {
+        if (res.defeated) {
+          sfx.bossWin();
+          showCutIn({ kicker: 'BOSS DEFEATED!', title: res.boss.title, subtitle: `+${res.rewardXp} Bonus XP`, variant: 'gold' });
+        } else {
+          sfx.bossHit();
+          showToast(`⚔️ Dealt −${res.dmg} HP to ${res.boss.title}!`);
+        }
+        refreshCurrentView();
+        checkAchievementsAndNotify();
+      }
+      return;
+    }
+
+    // Boss Direct Strike
+    const bossStrikeBtn = e.target.closest('[data-boss-strike]');
+    if (bossStrikeBtn) {
+      const [bossId, amt] = bossStrikeBtn.dataset.bossStrike.split('|');
+      const res = damageBoss(state, bossId, Number(amt) || 60);
+      if (res) {
+        if (res.defeated) {
+          sfx.bossWin();
+          showCutIn({ kicker: 'BOSS DEFEATED!', title: res.boss.title, subtitle: `+${res.rewardXp} Bonus XP`, variant: 'gold' });
+        } else {
+          sfx.bossHit();
+          showToast(`⚔️ Strike! −${res.dmg} HP on ${res.boss.title} (${res.boss.hp} HP left)`);
+        }
+        refreshCurrentView();
+        checkAchievementsAndNotify();
+      }
+      return;
+    }
+
+    // Delete Boss
+    const delBossBtn = e.target.closest('[data-delete-boss]');
+    if (delBossBtn) {
+      if (confirm('Delete this Boss Fight?')) {
+        deleteBoss(state, delBossBtn.dataset.deleteBoss);
+        refreshCurrentView();
+      }
+      return;
+    }
+
     // Multi-select chip toggles
     const chip = e.target.closest('.chip-option');
-    if (chip && !chip.dataset.presetSkill) {
+    if (chip && !chip.dataset.presetSkill && !chip.dataset.equipTitle) {
       if (chip.dataset.skill) chip.classList.toggle('selected-gold');
       else chip.classList.toggle('selected');
       return;
@@ -492,6 +797,7 @@ function bindEvents() {
     const tabBtn = e.target.closest('[data-tracker-tab]');
     if (tabBtn) {
       activeTrackerTab = tabBtn.dataset.trackerTab;
+      sfx.click();
       renderApp(state, activeTrackerTab);
       return;
     }
@@ -499,20 +805,31 @@ function bindEvents() {
     // Complete task (1-click)
     const completeBtn = e.target.closest('[data-complete-task]');
     if (completeBtn) {
+      const taskObj = state.tasks.find(t => t.id === completeBtn.dataset.completeTask);
       const res = completeTask(state, completeBtn.dataset.completeTask);
       if (!res) return;
-      renderApp(state, activeTrackerTab);
+      sfx.taskDone();
+
+      // Deal automatic damage to any active Boss linked to the same ability or skill!
+      const bossHits = taskObj
+        ? applyTaskDamageToMatchingBosses(state, taskObj.abilities, taskObj.skillIds, res.gainedTotalXp)
+        : [];
+
+      refreshCurrentView();
       if (res.goalpostBonusTriggered) {
         showToast(`★ GOALPOST QUOTA REACHED! +${res.gainedTotalXp} XP (with Bonus!)`);
       } else {
         showToast(`+${res.gainedTotalXp} XP · ${res.taskTitle}`);
       }
-      if (res.leveledUp) {
-        setTimeout(() => showToast(`✦ LEVEL UP! You are now LV.${res.newLevel}!`), 350);
-      }
-      if (res.rankUps.length > 0) {
-        setTimeout(() => showToast(`▲ RANK UP! ${res.rankUps.join(' · ')}`), 700);
-      }
+      bossHits.forEach(h => {
+        if (h.defeated) {
+          sfx.bossWin();
+          showCutIn({ kicker: 'BOSS DEFEATED!', title: h.boss.title, subtitle: `+${h.rewardXp} Bonus XP`, variant: 'gold' });
+        } else {
+          showToast(`⚔️ −${h.dmg} HP dealt to Boss "${h.boss.title}"!`);
+        }
+      });
+      handleXpCelebration(res, res.taskTitle);
       return;
     }
 
@@ -521,7 +838,7 @@ function bindEvents() {
     if (delTaskBtn) {
       if (confirm('Delete this task?')) {
         deleteTask(state, delTaskBtn.dataset.deleteTask);
-        renderApp(state, activeTrackerTab);
+        refreshCurrentView();
       }
       return;
     }
@@ -532,7 +849,7 @@ function bindEvents() {
       if (confirm('Delete this log entry and reverse its XP?')) {
         const res = deleteLogEntry(state, delLogBtn.dataset.deleteLog);
         if (res) {
-          renderApp(state, activeTrackerTab);
+          refreshCurrentView();
           const sign = res.reversedXp >= 0 ? `−${res.reversedXp}` : `+${Math.abs(res.reversedXp)}`;
           showToast(`Deleted "${res.title}" (${sign} XP)`);
         }
@@ -548,7 +865,7 @@ function bindEvents() {
       if (sk && confirm(`Remove skill "${sk.name}"?`)) {
         state.skills = state.skills.filter(s => s.id !== id);
         saveState(state);
-        renderApp(state, activeTrackerTab);
+        refreshCurrentView();
         showToast(`Removed skill: ${sk.name}`);
       }
       return;
@@ -559,8 +876,8 @@ function bindEvents() {
     if (themePick) {
       state.settings.theme = themePick.dataset.themePick;
       saveState(state);
-      renderApp(state, activeTrackerTab);
-      populateConfigPage();
+      sfx.click();
+      refreshCurrentView();
     }
   });
 
@@ -602,8 +919,24 @@ function bindEvents() {
     addTask(state, { title, difficultyId, recurrence, scope, dueDate, days, intervalDays, weeklyTarget, abilityIds, skillIds });
     closeAllModals();
     if (recurrence !== 'one_time' && activeTrackerTab === 'log') activeTrackerTab = 'today';
-    renderApp(state, activeTrackerTab);
+    refreshCurrentView();
     showToast(`Added task: "${title}"`);
+  });
+
+  // Summon New Boss
+  document.getElementById('form-boss').addEventListener('submit', e => {
+    e.preventDefault();
+    const title = document.getElementById('boss-title').value.trim();
+    const tierId = document.getElementById('boss-tier').value;
+    const deadline = document.getElementById('boss-deadline').value;
+    const abilityId = document.getElementById('boss-ability').value;
+    const skillId = document.getElementById('boss-skill').value;
+    const steps = document.getElementById('boss-steps').value.split('\n');
+    createBoss(state, { title, tierId, deadline, abilityId, skillId, steps });
+    closeAllModals();
+    sfx.bossHit();
+    refreshCurrentView();
+    showToast(`⚔️ Boss Summoned: "${title}"!`);
   });
 
   // Submit Penalty
@@ -620,18 +953,19 @@ function bindEvents() {
     }
 
     const res = logPenalty(state, { title, severityId, abilityIds, skillIds, auto: false });
+    sfx.penalty();
     closeAllModals();
-    renderApp(state, activeTrackerTab);
+    refreshCurrentView();
     showToast(`−${res.penaltyXp} XP applied for "${title}"`, 'danger');
     if (res.rankDowns.length > 0) {
-      setTimeout(() => showToast(`▼ RANK DOWN: ${res.rankDowns.join(' · ')}`, 'danger'), 350);
+      showCutIn({ kicker: 'RANK DOWN', title: res.rankDowns[0], subtitle: title, variant: 'danger' });
     }
   });
 
   // Right-click (PC) & Long-press (Mobile) on Skill to Edit
   document.getElementById('skills-list').addEventListener('contextmenu', e => {
     const item = e.target.closest('[data-edit-skill]');
-    if (!item || e.target.closest('[data-delete-skill]')) return;
+    if (!item || e.target.closest('[data-delete-skill]') || e.target.closest('[data-ms-inc]')) return;
     e.preventDefault();
     populateSkillModal(item.dataset.editSkill);
     openModal('modal-skill');
@@ -640,7 +974,7 @@ function bindEvents() {
   let longPressTimer = null;
   document.getElementById('skills-list').addEventListener('touchstart', e => {
     const item = e.target.closest('[data-edit-skill]');
-    if (!item || e.target.closest('[data-delete-skill]')) return;
+    if (!item || e.target.closest('[data-delete-skill]') || e.target.closest('[data-ms-inc]')) return;
     longPressTimer = setTimeout(() => {
       longPressTimer = null;
       populateSkillModal(item.dataset.editSkill);
@@ -653,7 +987,6 @@ function bindEvents() {
     }, { passive: true });
   });
 
-  // Skill Custom Compressed Icon Image
   document.getElementById('skill-icon-file').addEventListener('change', async e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -670,12 +1003,16 @@ function bindEvents() {
     renderSkillImgPreview(null);
   });
 
-  // Add / Edit Skill Submit
   document.getElementById('form-skill').addEventListener('submit', e => {
     e.preventDefault();
     const name = document.getElementById('skill-name').value.trim();
     const icon = document.getElementById('skill-icon').value.trim() || '✦';
     const linkedAbility = document.getElementById('skill-ability').value;
+    const msLabel = document.getElementById('skill-ms-label').value.trim();
+    const msTarget = Number(document.getElementById('skill-ms-target').value) || 0;
+    const msCurrent = Number(document.getElementById('skill-ms-current').value) || 0;
+    const msUnit = document.getElementById('skill-ms-unit').value.trim();
+    const milestone = msTarget > 0 ? { label: msLabel || 'Progress', current: msCurrent, target: msTarget, unit: msUnit } : null;
     if (!name) return;
 
     if (editingSkillId) {
@@ -684,10 +1021,11 @@ function bindEvents() {
         sk.name = name;
         sk.icon = icon;
         sk.linkedAbility = linkedAbility;
+        sk.milestone = milestone;
         if (pendingSkillImage !== undefined) sk.iconImage = pendingSkillImage;
         saveState(state);
         closeAllModals();
-        renderApp(state, activeTrackerTab);
+        refreshCurrentView();
         showToast(`Updated skill: ${name}`);
       }
     } else {
@@ -697,11 +1035,13 @@ function bindEvents() {
         icon,
         iconImage: pendingSkillImage || null,
         linkedAbility,
+        milestone,
         xp: 0,
       });
       saveState(state);
       closeAllModals();
-      renderApp(state, activeTrackerTab);
+      refreshCurrentView();
+      checkAchievementsAndNotify();
       showToast(`Added skill: ${icon} ${name}`);
     }
   });
@@ -731,21 +1071,22 @@ function bindEvents() {
     state.profile.goal = document.getElementById('prof-goal').value.trim();
     state.profile.pixelateAvatar = document.getElementById('prof-pixelate').checked;
     if (pendingAvatarDataUrl !== undefined) state.profile.avatarDataUrl = pendingAvatarDataUrl;
+    if (state.profile.weightKg) recordBodySnapshot(state);
     saveState(state);
     closeAllModals();
-    renderApp(state, activeTrackerTab);
+    refreshCurrentView();
+    checkAchievementsAndNotify();
     showToast('Profile saved!');
   });
 
-  // Level Title Track selector
+  // Config Controls
   document.getElementById('config-title-track').addEventListener('change', e => {
     state.settings.titleTrack = e.target.value;
     saveState(state);
-    renderApp(state, activeTrackerTab);
+    refreshCurrentView();
     showToast('Level title progression updated!');
   });
 
-  // Live Custom Color Pickers
   ['primary', 'gold', 'radar'].forEach(key => {
     document.getElementById(`color-${key}`).addEventListener('input', e => {
       state.settings.customColors[key] = e.target.value;
@@ -756,11 +1097,26 @@ function bindEvents() {
   document.getElementById('btn-reset-colors').addEventListener('click', () => {
     state.settings.customColors = { primary: '', gold: '', radar: '' };
     saveState(state);
-    renderApp(state, activeTrackerTab);
-    populateConfigPage();
+    refreshCurrentView();
   });
 
-  // Decay Settings
+  document.getElementById('setting-sound').addEventListener('change', e => {
+    state.settings.soundEnabled = e.target.checked;
+    setAudioMuted(!e.target.checked);
+    saveState(state);
+    renderApp(state, activeTrackerTab);
+  });
+
+  document.getElementById('btn-save-reminder').addEventListener('click', async () => {
+    const enabled = document.getElementById('setting-reminder').checked;
+    const timeStr = document.getElementById('setting-reminder-time').value || '20:00';
+    state.settings.reminderEnabled = enabled;
+    state.settings.reminderTime = timeStr;
+    saveState(state);
+    const res = await configureDailyReminder(enabled, timeStr);
+    showToast(res.message, res.ok ? 'normal' : 'danger');
+  });
+
   document.getElementById('setting-auto-decay').addEventListener('change', e => {
     state.settings.autoDecayEnabled = e.target.checked;
     saveState(state);
@@ -784,8 +1140,8 @@ function bindEvents() {
       }
       await requestHealthConnectPermissions();
       const summary = await syncHealthConnect(state, 7);
-      renderApp(state, activeTrackerTab);
-      populateConfigPage();
+      refreshCurrentView();
+      checkAchievementsAndNotify();
       showToast(`Health Connect linked! Imported ${summary.workoutsImported} workout(s).`);
     } catch (err) {
       showToast(err.message || 'Could not connect to Health Connect.', 'danger');
@@ -795,12 +1151,14 @@ function bindEvents() {
   document.getElementById('btn-hc-sync').addEventListener('click', async () => {
     try {
       const summary = await syncHealthConnect(state, 7);
-      renderApp(state, activeTrackerTab);
-      populateConfigPage();
+      refreshCurrentView();
+      checkAchievementsAndNotify();
       const parts = [];
       if (summary.weightUpdated) parts.push(`Weight → ${summary.newWeightKg}kg`);
       if (summary.bodyFatPct) parts.push(`BF ${summary.bodyFatPct}%`);
-      if (summary.workoutsImported > 0) parts.push(`+${summary.workoutsImported} workout(s) (+${summary.totalFitnessXp} XP)`);
+      if (summary.lastSleepHours) parts.push(`Sleep ${summary.lastSleepHours}h`);
+      if (summary.todaySteps) parts.push(`${summary.todaySteps.toLocaleString()} steps`);
+      if (summary.workoutsImported > 0) parts.push(`+${summary.workoutsImported} workout(s)`);
       showToast(parts.length ? `Health Connect: ${parts.join(' · ')}` : 'Health Connect synced — already up to date!');
     } catch (err) {
       showToast(err.message || 'Install Android APK for live Health Connect sync.', 'danger');
@@ -808,29 +1166,41 @@ function bindEvents() {
   });
 
   document.getElementById('btn-hc-simulate').addEventListener('click', () => {
-    const summary = applyHealthConnectData(state, {
-      latestWeightKg: state.profile.weightKg || 72.4,
-      latestBodyFatPct: 14.8,
-      workouts: [
-        {
-          id: 'sim_hevy_' + todayKey(),
-          title: 'Hevy — Push Day',
-          durationMinutes: 62,
-          startTime: new Date().toISOString(),
-          endTime: new Date().toISOString(),
-        },
-      ],
-    });
-    renderApp(state, activeTrackerTab);
-    populateConfigPage();
-    if (summary.workoutsImported > 0) {
-      showToast(`Test Sync: BF ${summary.bodyFatPct}% · +1 Hevy workout (+${summary.totalFitnessXp} Fitness XP)`);
-    } else {
-      showToast(`Test Sync: Scale updated (BF ${summary.bodyFatPct}%) — today's test workout already synced.`);
-    }
+    const summary = applyHealthConnectData(
+      state,
+      {
+        latestWeightKg: state.profile.weightKg || 72.4,
+        latestBodyFatPct: 14.8,
+        lastSleepHours: 7.5,
+        todaySteps: 8450,
+        workouts: [
+          {
+            id: 'sim_hevy_' + todayKey(),
+            title: 'Hevy — Push Day',
+            durationMinutes: 62,
+            startTime: new Date().toISOString(),
+            endTime: new Date().toISOString(),
+          },
+        ],
+      },
+      { simulated: true }
+    );
+    refreshCurrentView();
+    checkAchievementsAndNotify();
+    showToast(
+      summary.workoutsImported > 0
+        ? `Test Sync: BF ${summary.bodyFatPct}% · Sleep 7.5h (+10% XP) · 8,450 steps · +1 Hevy workout!`
+        : `Test Sync updated (today's test workout & step bonus already logged).`
+    );
   });
 
-  // Optional Backup Inputs
+  document.getElementById('btn-hc-disconnect').addEventListener('click', () => {
+    disconnectHealthConnect(state);
+    refreshCurrentView();
+    showToast('Disconnected Health Connect & cleared synced body metrics.');
+  });
+
+  // Backups
   document.getElementById('backup-email').addEventListener('change', e => {
     state.settings.backup.email = e.target.value.trim();
     saveState(state);
@@ -839,29 +1209,25 @@ function bindEvents() {
     state.settings.backup.driveClientId = e.target.value.trim();
     saveState(state);
   });
-
-  // Email Backup
   document.getElementById('btn-backup-email').addEventListener('click', () => {
     const email = document.getElementById('backup-email').value.trim();
     state.settings.backup.email = email;
     state.settings.backup.lastBackupAt = new Date().toISOString();
     saveState(state);
     const filename = triggerEmailBackup(state, email);
-    populateConfigPage();
+    refreshCurrentView();
+    checkAchievementsAndNotify();
     showToast(`Downloaded ${filename} & opened email draft!`);
   });
-
-  // Zero-setup Google Drive Backup
   document.getElementById('btn-drive-quick').addEventListener('click', () => {
     const filename = downloadJsonBackup(state);
     state.settings.backup.lastBackupAt = new Date().toISOString();
     saveState(state);
-    populateConfigPage();
+    refreshCurrentView();
+    checkAchievementsAndNotify();
     window.open('https://drive.google.com/drive/my-drive', '_blank', 'noopener');
     showToast(`Downloaded ${filename} — drop it into Google Drive!`);
   });
-
-  // Optional Direct Google Drive OAuth Sync
   document.getElementById('btn-drive-upload').addEventListener('click', async () => {
     const clientId = document.getElementById('backup-drive-client').value.trim();
     state.settings.backup.driveClientId = clientId;
@@ -870,46 +1236,40 @@ function bindEvents() {
       await uploadBackupToDrive(state, clientId);
       state.settings.backup.lastBackupAt = new Date().toISOString();
       saveState(state);
-      populateConfigPage();
+      refreshCurrentView();
+      checkAchievementsAndNotify();
       showToast('☁ Synced backup to Google Drive!');
     } catch (err) {
       showToast(err.message || 'Drive sync failed.', 'danger');
     }
   });
-
   document.getElementById('btn-drive-restore').addEventListener('click', async () => {
     const clientId = document.getElementById('backup-drive-client').value.trim();
     try {
-      const restored = await restoreBackupFromDrive(clientId);
-      state = restored;
+      state = await restoreBackupFromDrive(clientId);
       saveState(state);
-      renderApp(state, activeTrackerTab);
-      populateConfigPage();
+      refreshCurrentView();
       showToast('☁ Restored save from Google Drive!');
     } catch (err) {
       showToast(err.message || 'Drive restore failed.', 'danger');
     }
   });
-
-  // Local JSON & Quick Transfer Code
   document.getElementById('btn-export-json').addEventListener('click', () => {
     const filename = downloadJsonBackup(state);
     state.settings.backup.lastBackupAt = new Date().toISOString();
     saveState(state);
-    populateConfigPage();
+    refreshCurrentView();
+    checkAchievementsAndNotify();
     showToast(`Exported ${filename}`);
   });
-
   document.getElementById('btn-copy-code').addEventListener('click', async () => {
     try {
-      const code = encodeBackupCode(state);
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(encodeBackupCode(state));
       showToast('📋 Backup code copied to clipboard!');
     } catch {
       showToast('Could not copy to clipboard.', 'danger');
     }
   });
-
   document.getElementById('btn-restore-code').addEventListener('click', () => {
     const code = document.getElementById('restore-code-input').value.trim();
     if (!code) return;
@@ -917,14 +1277,12 @@ function bindEvents() {
       state = decodeBackupCode(code);
       saveState(state);
       document.getElementById('restore-code-input').value = '';
-      renderApp(state, activeTrackerTab);
-      populateConfigPage();
+      refreshCurrentView();
       showToast('Restored character from backup code!');
     } catch {
       showToast('Invalid backup code.', 'danger');
     }
   });
-
   document.getElementById('input-import-json').addEventListener('change', e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -935,8 +1293,7 @@ function bindEvents() {
         if (!parsed.profile || !parsed.abilities) throw new Error('Invalid');
         state = parsed;
         saveState(state);
-        renderApp(state, activeTrackerTab);
-        populateConfigPage();
+        refreshCurrentView();
         showToast('Save imported!');
       } catch {
         showToast('Invalid JSON file.', 'danger');
@@ -944,19 +1301,17 @@ function bindEvents() {
     };
     reader.readAsText(file);
   });
-
   document.getElementById('btn-fresh-start').addEventListener('click', () => {
-    if (!confirm('Reset all stats, skills, and tasks back to Rank 1 & re-run setup?')) return;
+    if (!confirm('Reset all stats, skills, bosses, trophies, and tasks back to Rank 1 & re-run setup?')) return;
     state = createFreshState(state.settings);
     saveState(state);
     switchPage('status');
-    renderApp(state, activeTrackerTab);
     openSetupWizard(false);
   });
 }
 
 // =========================================================================
-// STARTUP + SERVICE WORKER (OFFLINE CACHE & LIVE UPDATES)
+// STARTUP + SERVICE WORKER
 // =========================================================================
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
@@ -964,6 +1319,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 
 bindEvents();
 const decayEvents = runAutoDecayCheck(state);
+const expiredBosses = checkExpiredBosses(state);
 renderApp(state, activeTrackerTab);
 
 if (!state.setupCompleted) {
@@ -973,24 +1329,40 @@ if (!state.setupCompleted) {
     const summary = decayEvents.map(d => `${d.ability} (−${d.loss} XP)`).join(', ');
     showToast(`▼ Auto-Decay triggered: ${summary}`, 'danger');
   }
+  if (expiredBosses.length > 0) {
+    expiredBosses.forEach(f => showToast(`💀 Boss Missed Deadline: ${f.boss.title} (−${f.penaltyXp} XP)`, 'danger'));
+  }
+
+  // Auto-show Weekly Review once per new week if there was activity last week
+  const curWeek = getWeekStartKey();
+  if (state.stats && state.stats.lastReviewWeek !== curWeek) {
+    const prevRep = buildWeeklyReport(state, true);
+    state.stats.lastReviewWeek = curWeek;
+    saveState(state);
+    if (prevRep.tasksDone > 0) {
+      setTimeout(() => openReviewModal(true), 700);
+    }
+  }
+
+  // Auto-sync Health Connect on launch & app resume
   if (isNativeAndroid() && state.healthConnect?.connected) {
     const runSilentHcSync = () => {
       syncHealthConnect(state, 7)
         .then(s => {
-          if (s.weightUpdated || s.workoutsImported > 0) {
-            renderApp(state, activeTrackerTab);
+          if (s.weightUpdated || s.workoutsImported > 0 || s.stepBonusAwarded) {
+            refreshCurrentView();
+            checkAchievementsAndNotify();
             const parts = [];
             if (s.weightUpdated) parts.push(`Weight → ${s.newWeightKg}kg`);
             if (s.workoutsImported > 0) parts.push(`+${s.workoutsImported} workout(s)`);
+            if (s.stepBonusAwarded) parts.push('8K+ Steps Bonus!');
             showToast(`Health Connect synced: ${parts.join(' · ')}`);
           }
         })
         .catch(() => {});
     };
-
     runSilentHcSync();
 
-    // Also auto-sync whenever you switch back to the app after weighing in or finishing a Hevy workout
     let lastResumeSync = Date.now();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Date.now() - lastResumeSync > 30000) {

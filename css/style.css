@@ -1219,3 +1219,332 @@ html, body {
   .abilities-strip { grid-template-columns: repeat(3, 1fr); }
   .tutorial-grid, .form-row, .color-pickers { grid-template-columns: 1fr; }
 }
+
+/* ==========================================================================
+   NEW SYSTEMS: ACHIEVEMENTS, BOSSES, TIMER, MILESTONES, ANALYTICS, CUT-IN
+   ========================================================================== */
+
+/* --- SKILL MILESTONE BAR --- */
+.skill-item-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-silver);
+}
+
+.skill-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.skill-milestone-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--border-subtle);
+  font-size: 11px;
+}
+
+.ms-track {
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.ms-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-gold));
+  transition: width 0.25s ease;
+}
+
+/* --- TROPHIES / ACHIEVEMENTS GRID --- */
+.ach-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 11px;
+}
+
+.ach-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-subtle);
+  transition: transform 0.14s ease, border-color 0.14s ease;
+}
+
+.ach-card.unlocked {
+  border-color: var(--accent-gold);
+  box-shadow: 3px 3px 0 var(--accent-gold-dim);
+}
+
+.ach-card.locked {
+  opacity: 0.46;
+}
+
+.ach-card.locked .ach-badge {
+  filter: grayscale(1) brightness(0.45);
+}
+
+.ach-badge {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.ach-name {
+  font-size: 12.5px;
+  font-weight: 900;
+  color: var(--text-bright);
+  line-height: 1.2;
+}
+
+.ach-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.ach-reward {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent-gold);
+  text-transform: uppercase;
+}
+
+/* --- BOSS FIGHTS --- */
+.boss-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.boss-card {
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-subtle);
+  border-left: 5px solid var(--accent-danger);
+  box-shadow: var(--hard-shadow);
+  padding: 16px 18px;
+}
+
+.boss-card.defeated {
+  border-left-color: var(--accent-gold);
+  opacity: 0.78;
+}
+
+.boss-card.failed {
+  border-left-color: #64748b;
+  opacity: 0.6;
+}
+
+.boss-hp-track {
+  height: 14px;
+  background: #07070d;
+  border: 1.5px solid var(--accent-danger);
+  transform: skewX(-14deg);
+  overflow: hidden;
+  margin: 10px 0 6px;
+}
+
+.boss-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #b91c1c, var(--accent-danger), #fb923c);
+  transition: width 0.35s ease;
+}
+
+.boss-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.boss-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.boss-step.done {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+/* --- ACTIVITY HEATMAP & ANALYTICS --- */
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  gap: 4px;
+}
+
+.hm-cell {
+  aspect-ratio: 1;
+  min-width: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.hm-l1 { background: color-mix(in srgb, var(--accent-primary) 35%, transparent); }
+.hm-l2 { background: color-mix(in srgb, var(--accent-primary) 65%, transparent); }
+.hm-l3 { background: var(--accent-primary); }
+.hm-l4 { background: var(--accent-gold); box-shadow: 0 0 6px var(--accent-gold-dim); }
+
+.heatmap-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  font-family: monospace;
+}
+
+.stats-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 780px) {
+  .stats-summary-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+.report-grade {
+  font-size: 56px;
+  font-weight: 900;
+  font-style: italic;
+  color: var(--accent-gold);
+  line-height: 1;
+  text-shadow: 4px 4px 0 rgba(0, 0, 0, 0.7);
+}
+
+/* --- FLOATING FOCUS TIMER BAR --- */
+.timer-float {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 150;
+  background: var(--bg-card-elevated);
+  border: 2px solid var(--accent-gold);
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.7);
+  padding: 10px 14px;
+  display: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.timer-float.visible { display: flex; }
+
+.timer-clock {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--accent-gold);
+}
+
+/* --- STYLIZED CUT-IN OVERLAY --- */
+.cutin-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.cutin-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cutin-band {
+  width: 100%;
+  background: linear-gradient(90deg, rgba(7,7,14,0.94), rgba(20,16,42,0.96), rgba(7,7,14,0.94));
+  border-top: 3px solid var(--accent-gold);
+  border-bottom: 3px solid var(--accent-gold);
+  padding: 24px 32px;
+  transform: skewY(-3deg) scaleY(0.7);
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85);
+}
+
+.cutin-overlay.open .cutin-band {
+  transform: skewY(-3deg) scaleY(1);
+}
+
+.cutin-overlay.variant-danger .cutin-band {
+  border-color: var(--accent-danger);
+}
+
+.cutin-text {
+  transform: skewY(3deg);
+  text-align: center;
+}
+
+.cutin-kicker {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent-gold);
+}
+
+.cutin-title {
+  font-size: 36px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 2px;
+  color: #fff;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+.cutin-sub {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.cutin-badge {
+  width: 64px;
+  height: 64px;
+  image-rendering: pixelated;
+  transform: skewY(3deg);
+  border: 2px solid var(--accent-gold);
+}
+

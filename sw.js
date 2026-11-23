@@ -1,4 +1,4 @@
-const CACHE_NAME = 'life-sheet-v1';
+const CACHE_NAME = 'life-sheet-v2';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -10,6 +10,12 @@ const CORE_ASSETS = [
   './js/radar.js',
   './js/backup.js',
   './js/healthconnect.js',
+  './js/audio.js',
+  './js/achievements.js',
+  './js/bosses.js',
+  './js/timer.js',
+  './js/analytics.js',
+  './js/notifications.js',
   './js/ui.js',
   './js/app.js',
 ];

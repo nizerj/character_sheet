@@ -1,5 +1,4 @@
-import { ABILITIES } from './constants.js';
-import { saveState, todayKey, completeTask } from './state.js';
+import { saveState, todayKey, completeTask, recordBodySnapshot } from './state.js';
 
 function getNativePlugin() {
   return window.Capacitor?.Plugins?.HealthConnect || null;
@@ -43,47 +42,128 @@ function durationToXp(minutes) {
   return 35;
 }
 
-// Applies synced scale + workout data into app state (deduplicated by session ID)
-export function applyHealthConnectData(state, payload) {
+export function disconnectHealthConnect(state) {
+  state.healthConnect = {
+    connected: false,
+    isSimulated: false,
+    hasRealBodyData: false,
+    lastSyncAt: null,
+    bodyFatPct: null,
+    leanMassKg: null,
+    lastSleepHours: null,
+    sleepDate: null,
+    todaySteps: 0,
+    stepsDate: null,
+    stepsBonusAwardedDate: null,
+    syncedWorkoutIds: [],
+  };
+  saveState(state);
+}
+
+// Applies synced scale + workout + sleep + steps data into app state
+export function applyHealthConnectData(state, payload, { simulated = false } = {}) {
   if (!state.healthConnect) {
-    state.healthConnect = {
-      connected: false,
-      lastSyncAt: null,
-      bodyFatPct: null,
-      syncedWorkoutIds: [],
-    };
+    disconnectHealthConnect(state);
   }
   if (!Array.isArray(state.healthConnect.syncedWorkoutIds)) {
     state.healthConnect.syncedWorkoutIds = [];
   }
 
+  const today = todayKey();
   const summary = {
     weightUpdated: false,
     newWeightKg: null,
     bodyFatPct: null,
+    leanMassKg: null,
     workoutsImported: 0,
     totalFitnessXp: 0,
+    lastSleepHours: null,
+    todaySteps: 0,
+    stepBonusAwarded: false,
   };
 
-  // 1. Bioimpedance Scale: Weight & Body Fat %
-  if (payload.latestWeightKg && payload.latestWeightKg > 20) {
-    const rounded = Math.round(payload.latestWeightKg * 10) / 10;
+  // 1. Bioimpedance Scale: Weight, Body Fat %, Lean Body Mass
+  // BUG FIX: When real Health Connect sync returns NO body fat record, clear stale/simulated values so user is never wrongly labeled "Shredded"!
+  const rawWeight = Number(payload.latestWeightKg);
+  const rawBf = Number(payload.latestBodyFatPct);
+  const rawLean = Number(payload.latestLeanMassKg);
+
+  if (!simulated && (!rawBf || rawBf < 4 || rawBf > 60)) {
+    state.healthConnect.bodyFatPct = null;
+    state.healthConnect.leanMassKg = null;
+    state.healthConnect.hasRealBodyData = false;
+  }
+
+  if (rawWeight && rawWeight > 20 && rawWeight < 300) {
+    const rounded = Math.round(rawWeight * 10) / 10;
     if (state.profile.weightKg !== rounded) {
       state.profile.weightKg = rounded;
       summary.weightUpdated = true;
       summary.newWeightKg = rounded;
     }
   }
-  if (typeof payload.latestBodyFatPct === 'number' && payload.latestBodyFatPct > 2 && payload.latestBodyFatPct < 70) {
-    state.healthConnect.bodyFatPct = Math.round(payload.latestBodyFatPct * 10) / 10;
+
+  if (rawBf && rawBf >= 4 && rawBf <= 60) {
+    state.healthConnect.bodyFatPct = Math.round(rawBf * 10) / 10;
     summary.bodyFatPct = state.healthConnect.bodyFatPct;
-  }
-  if (typeof payload.latestLeanMassKg === 'number' && payload.latestLeanMassKg > 15) {
-    state.healthConnect.leanMassKg = Math.round(payload.latestLeanMassKg * 10) / 10;
-    summary.leanMassKg = state.healthConnect.leanMassKg;
+    if (!simulated) state.healthConnect.hasRealBodyData = true;
   }
 
-  // 2. Hevy / Exercise Sessions
+  const currentW = state.profile.weightKg || rawWeight || 0;
+  if (rawLean && rawLean > 15 && (!currentW || rawLean <= currentW * 0.96)) {
+    state.healthConnect.leanMassKg = Math.round(rawLean * 10) / 10;
+    summary.leanMassKg = state.healthConnect.leanMassKg;
+  } else if (!simulated && !rawLean) {
+    state.healthConnect.leanMassKg = null;
+  }
+
+  // Record daily body trend point if weight exists
+  if (state.profile.weightKg) {
+    recordBodySnapshot(state);
+  }
+
+  // 2. Sleep (last night)
+  const rawSleep = Number(payload.lastSleepHours);
+  if (rawSleep && rawSleep > 0.5 && rawSleep <= 20) {
+    state.healthConnect.lastSleepHours = Math.round(rawSleep * 10) / 10;
+    state.healthConnect.sleepDate = today;
+    summary.lastSleepHours = state.healthConnect.lastSleepHours;
+  }
+
+  // 3. Steps today + 8,000-step daily Fitness Bonus
+  const rawSteps = Math.round(Number(payload.todaySteps) || 0);
+  if (rawSteps > 0) {
+    state.healthConnect.todaySteps = rawSteps;
+    state.healthConnect.stepsDate = today;
+    summary.todaySteps = rawSteps;
+
+    if (rawSteps >= 8000 && state.healthConnect.stepsBonusAwardedDate !== today) {
+      state.healthConnect.stepsBonusAwardedDate = today;
+      const stepXp = 25;
+      const nowIso = new Date().toISOString();
+      state.abilities.fitness.xp = (state.abilities.fitness.xp || 0) + stepXp;
+      state.abilities.fitness.lastActivity = nowIso;
+      state.abilities.fitness.lastDecayDate = nowIso;
+      state.totalXp += stepXp;
+      state.logs.unshift({
+        id: 'hc_steps_' + today,
+        type: 'task',
+        title: `👟 8K+ Steps Bonus (${rawSteps.toLocaleString()} steps)`,
+        difficulty: 'easy',
+        baseXp: stepXp,
+        totalXpDelta: stepXp,
+        abilityDeltas: { fitness: stepXp },
+        skillDeltas: {},
+        abilities: ['fitness'],
+        skillIds: [],
+        timestamp: nowIso,
+      });
+      summary.stepBonusAwarded = true;
+      summary.totalFitnessXp += stepXp;
+    }
+  }
+
+  // 4. Hevy / Exercise Sessions
   const sessions = Array.isArray(payload.workouts) ? payload.workouts : [];
   const fitnessSkill = state.skills.find(s => s.linkedAbility === 'fitness');
   const fitnessGoalpost = state.tasks.find(
@@ -101,9 +181,8 @@ export function applyHealthConnectData(state, payload) {
     const xp = durationToXp(mins);
     const nowIso = session.endTime || new Date().toISOString();
 
-    // If user has a Fitness Goalpost task and workout was today, check it off automatically!
     const sessionDay = (session.startTime || nowIso).slice(0, 10);
-    if (fitnessGoalpost && sessionDay === todayKey()) {
+    if (fitnessGoalpost && sessionDay === today) {
       const res = completeTask(state, fitnessGoalpost.id);
       if (res) {
         summary.workoutsImported++;
@@ -112,7 +191,6 @@ export function applyHealthConnectData(state, payload) {
       }
     }
 
-    // Otherwise award Fitness XP directly + linked Fitness skill
     state.abilities.fitness.xp = (state.abilities.fitness.xp || 0) + xp;
     state.abilities.fitness.lastActivity = nowIso;
     state.abilities.fitness.lastDecayDate = nowIso;
@@ -145,12 +223,12 @@ export function applyHealthConnectData(state, payload) {
     summary.totalFitnessXp += xp;
   }
 
-  // Keep synced IDs list bounded
   if (state.healthConnect.syncedWorkoutIds.length > 200) {
     state.healthConnect.syncedWorkoutIds = state.healthConnect.syncedWorkoutIds.slice(-200);
   }
 
   state.healthConnect.connected = true;
+  state.healthConnect.isSimulated = Boolean(simulated);
   state.healthConnect.lastSyncAt = new Date().toISOString();
   saveState(state);
   return summary;
@@ -162,5 +240,5 @@ export async function syncHealthConnect(state, daysBack = 7) {
     throw new Error('Native Health Connect requires the Android APK.');
   }
   const data = await plugin.syncData({ daysBack });
-  return applyHealthConnectData(state, data);
+  return applyHealthConnectData(state, data, { simulated: false });
 }

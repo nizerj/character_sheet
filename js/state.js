@@ -48,6 +48,9 @@ export function createFreshState(keepSettings = null) {
     titleTrack: 'arcana',
     skillDisplay: 'moons',
     autoDecayEnabled: true,
+    soundEnabled: true,
+    reminderEnabled: false,
+    reminderTime: '20:00',
     customColors: { primary: '', gold: '', radar: '' },
     graceDays: {
       academics: 7,
@@ -86,12 +89,37 @@ export function createFreshState(keepSettings = null) {
     },
     skills: [],
     tasks: [],
+    bosses: [],
     logs: [],
+    bodyHistory: [],
+    achievements: { unlocked: {} },
+    stats: {
+      currentStreak: 0,
+      bestStreak: 0,
+      lastActiveDay: null,
+      balancedDays: 0,
+      balancedDaysDates: [],
+      goalpostsHit: 0,
+      bossesDefeated: 0,
+      focusSessions: 0,
+      totalFocusMinutes: 0,
+      milestonesCompleted: 0,
+      hadRankDown: false,
+      comebackAchieved: false,
+      lastReviewWeek: null,
+    },
     healthConnect: {
       connected: false,
+      isSimulated: false,
+      hasRealBodyData: false,
       lastSyncAt: null,
       bodyFatPct: null,
       leanMassKg: null,
+      lastSleepHours: null,
+      sleepDate: null,
+      todaySteps: 0,
+      stepsDate: null,
+      stepsBonusAwardedDate: null,
       syncedWorkoutIds: [],
     },
   };
@@ -117,7 +145,11 @@ export function loadState() {
       abilities: { ...fresh.abilities, ...(parsed.abilities || {}) },
       skills: Array.isArray(parsed.skills) ? parsed.skills : [],
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+      bosses: Array.isArray(parsed.bosses) ? parsed.bosses : [],
       logs: Array.isArray(parsed.logs) ? parsed.logs : [],
+      bodyHistory: Array.isArray(parsed.bodyHistory) ? parsed.bodyHistory : [],
+      achievements: { ...fresh.achievements, ...(parsed.achievements || {}) },
+      stats: { ...fresh.stats, ...(parsed.stats || {}) },
       healthConnect: { ...fresh.healthConnect, ...(parsed.healthConnect || {}) },
     };
   } catch (err) {
@@ -236,12 +268,101 @@ export function getTaskStatus(task) {
   };
 }
 
+export function recordBodySnapshot(state) {
+  const w = Number(state.profile?.weightKg);
+  if (!w || w <= 20) return;
+  if (!Array.isArray(state.bodyHistory)) state.bodyHistory = [];
+  const date = todayKey();
+  const entry = {
+    date,
+    weightKg: Math.round(w * 10) / 10,
+    bodyFatPct: state.healthConnect?.bodyFatPct || null,
+  };
+  const existingIdx = state.bodyHistory.findIndex(x => x.date === date);
+  if (existingIdx >= 0) state.bodyHistory[existingIdx] = entry;
+  else state.bodyHistory.push(entry);
+  if (state.bodyHistory.length > 90) state.bodyHistory = state.bodyHistory.slice(-90);
+}
+
+export function isWellRestedToday(state) {
+  return Boolean(
+    state.healthConnect?.connected &&
+    state.healthConnect?.sleepDate === todayKey() &&
+    Number(state.healthConnect?.lastSleepHours) >= 7
+  );
+}
+
+export function isFatiguedToday(state) {
+  return Boolean(
+    state.healthConnect?.connected &&
+    state.healthConnect?.sleepDate === todayKey() &&
+    Number(state.healthConnect?.lastSleepHours) > 0 &&
+    Number(state.healthConnect?.lastSleepHours) < 5.5
+  );
+}
+
+export function getTodayTrainedAbilities(state) {
+  const today = todayKey();
+  const set = new Set();
+  for (const log of state.logs || []) {
+    if (log.type === 'task' && log.timestamp?.startsWith(today)) {
+      (log.abilities || []).forEach(a => set.add(a));
+    }
+  }
+  return set;
+}
+
+function updateStreakAndCombo(state) {
+  if (!state.stats) state.stats = {};
+  const today = todayKey();
+  const last = state.stats.lastActiveDay;
+
+  if (last !== today) {
+    if (last && diffDaysKeys(last, today) === 1) {
+      state.stats.currentStreak = (state.stats.currentStreak || 0) + 1;
+    } else {
+      state.stats.currentStreak = 1;
+    }
+    state.stats.bestStreak = Math.max(state.stats.bestStreak || 0, state.stats.currentStreak);
+    state.stats.lastActiveDay = today;
+  }
+
+  // Check Balanced Day Combo (3+ distinct abilities trained today -> +35 Bonus XP once per day)
+  const trained = getTodayTrainedAbilities(state);
+  if (!Array.isArray(state.stats.balancedDaysDates)) state.stats.balancedDaysDates = [];
+  if (trained.size >= 3 && !state.stats.balancedDaysDates.includes(today)) {
+    state.stats.balancedDaysDates.push(today);
+    state.stats.balancedDays = (state.stats.balancedDays || 0) + 1;
+    const bonus = 35;
+    state.totalXp += bonus;
+    state.logs.unshift({
+      id: 'combo_' + today,
+      type: 'task',
+      title: `⚡ BALANCED DAY COMBO (${trained.size} Abilities Trained)`,
+      difficulty: 'easy',
+      baseXp: bonus,
+      totalXpDelta: bonus,
+      abilityDeltas: {},
+      skillDeltas: {},
+      abilities: [],
+      skillIds: [],
+      timestamp: new Date().toISOString(),
+    });
+    return { balancedComboTriggered: true, comboBonus: bonus };
+  }
+  return { balancedComboTriggered: false, comboBonus: 0 };
+}
+
 // --- AWARD XP HELPER ---
-function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multiplier = 1, extraLabel = '' }) {
+export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multiplier = 1, extraLabel = '' }) {
   const diff = DIFFICULTIES.find(d => d.id === difficultyId) || DIFFICULTIES[2];
-  const beforeLevel = getLevelInfo(state.totalXp).level;
+  const beforeLevel = getLevelInfo(state.totalXp, state.settings?.titleTrack).level;
   const beforeRanks = getAbilityRankSnapshot(state).ranks;
   const now = new Date().toISOString();
+
+  // Well-Rested Sleep Buff (+10% XP)
+  const sleepMult = isWellRestedToday(state) ? 1.1 : 1.0;
+  const totalMult = multiplier * sleepMult;
 
   let gainedTotalXp = 0;
   const abilityDeltas = {};
@@ -249,7 +370,7 @@ function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multipl
 
   abilityIds.forEach((abId, idx) => {
     const secMult = idx === 0 ? 1.0 : 0.6;
-    const gain = Math.max(1, Math.round(diff.xp * secMult * multiplier));
+    const gain = Math.max(1, Math.round(diff.xp * secMult * totalMult));
     state.abilities[abId].xp = Math.max(0, (state.abilities[abId].xp || 0) + gain);
     state.abilities[abId].lastActivity = now;
     state.abilities[abId].lastDecayDate = now;
@@ -258,13 +379,13 @@ function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multipl
   });
 
   if (abilityIds.length === 0) {
-    gainedTotalXp = Math.max(1, Math.round(diff.xp * multiplier));
+    gainedTotalXp = Math.max(1, Math.round(diff.xp * totalMult));
   }
 
   skillIds.forEach(skId => {
     const sk = state.skills.find(s => s.id === skId);
     if (sk) {
-      const skGain = Math.max(1, Math.round(diff.xp * multiplier));
+      const skGain = Math.max(1, Math.round(diff.xp * totalMult));
       sk.xp = Math.max(0, (sk.xp || 0) + skGain);
       skillDeltas[skId] = skGain;
     }
@@ -286,13 +407,16 @@ function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multipl
     timestamp: now,
   });
 
-  const afterLevel = getLevelInfo(state.totalXp).level;
+  const comboRes = updateStreakAndCombo(state);
+
+  const afterLevel = getLevelInfo(state.totalXp, state.settings?.titleTrack).level;
   const afterRanks = getAbilityRankSnapshot(state).ranks;
 
   const rankUps = [];
   for (const ab of ABILITIES) {
     if (afterRanks[ab.id].rank > beforeRanks[ab.id].rank) {
       rankUps.push(`${ab.label} → Rank ${afterRanks[ab.id].rank} (${afterRanks[ab.id].title})`);
+      if (state.stats?.hadRankDown) state.stats.comebackAchieved = true;
     }
   }
 
@@ -301,6 +425,9 @@ function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multipl
     leveledUp: afterLevel > beforeLevel,
     newLevel: afterLevel,
     rankUps,
+    balancedComboTriggered: comboRes.balancedComboTriggered,
+    comboBonus: comboRes.comboBonus,
+    wellRestedActive: sleepMult > 1,
   };
 }
 
@@ -326,6 +453,8 @@ export function completeTask(state, taskId) {
     // Partial XP (60%) on every check-in + 100% Goalpost Bonus when quota is reached!
     if (hitQuotaNow) {
       goalpostBonusTriggered = true;
+      if (!state.stats) state.stats = {};
+      state.stats.goalpostsHit = (state.stats.goalpostsHit || 0) + 1;
       result = applyXpGain(state, {
         title: task.title,
         difficultyId: task.difficulty,
@@ -430,6 +559,8 @@ export function logPenalty(state, { title, severityId, abilityIds, skillIds = []
   for (const ab of ABILITIES) {
     if (afterRanks[ab.id].rank < beforeRanks[ab.id].rank) {
       rankDowns.push(`${ab.label} → Rank ${afterRanks[ab.id].rank} (${afterRanks[ab.id].title})`);
+      if (!state.stats) state.stats = {};
+      state.stats.hadRankDown = true;
     }
   }
 
@@ -497,6 +628,60 @@ export function deleteLogEntry(state, logId) {
   state.logs.splice(idx, 1);
   saveState(state);
   return { title: entry.title, reversedXp: totalDelta };
+}
+
+// --- SKILL MILESTONE / SUB-QUEST INCREMENT ---
+export function incrementSkillMilestone(state, skillId, stepAmount) {
+  const sk = state.skills.find(s => s.id === skillId);
+  if (!sk || !sk.milestone || !sk.milestone.target) return null;
+
+  const amt = Math.max(1, Number(stepAmount) || 1);
+  const prev = Number(sk.milestone.current) || 0;
+  const target = Number(sk.milestone.target);
+  const next = Math.min(target, prev + amt);
+  const delta = next - prev;
+  if (delta <= 0) return null;
+
+  sk.milestone.current = next;
+  const justCompleted = next >= target && prev < target;
+  if (justCompleted) {
+    if (!state.stats) state.stats = {};
+    state.stats.milestonesCompleted = (state.stats.milestonesCompleted || 0) + 1;
+  }
+
+  const res = applyXpGain(state, {
+    title: `${sk.name}: ${sk.milestone.label || 'Milestone'} (+${delta} ${sk.milestone.unit || 'steps'})`,
+    difficultyId: justCompleted ? 'hard' : 'easy',
+    abilityIds: sk.linkedAbility ? [sk.linkedAbility] : ['productivity'],
+    skillIds: [sk.id],
+    multiplier: justCompleted ? 1.4 : 0.9,
+    extraLabel: justCompleted ? 'MILESTONE COMPLETE!' : `${next}/${target}`,
+  });
+
+  saveState(state);
+  return { ...res, skillName: sk.name, current: next, target, justCompleted };
+}
+
+// --- FOCUS / POMODORO SESSION REWARD (+20% DEEP FOCUS BONUS) ---
+export function recordFocusSession(state, { label, minutesCompleted, abilityId, skillId = '', completedFull = true }) {
+  if (!state.stats) state.stats = {};
+  state.stats.focusSessions = (state.stats.focusSessions || 0) + 1;
+  state.stats.totalFocusMinutes = (state.stats.totalFocusMinutes || 0) + minutesCompleted;
+
+  const diffId = minutesCompleted >= 50 ? 'hard' : minutesCompleted >= 25 ? 'medium' : 'easy';
+  const mult = completedFull ? 1.2 : 0.85; // +20% Deep Focus Bonus for completing full timer!
+
+  const res = applyXpGain(state, {
+    title: `⏱ Focus: ${label} (${minutesCompleted}m)`,
+    difficultyId: diffId,
+    abilityIds: abilityId ? [abilityId] : ['productivity'],
+    skillIds: skillId ? [skillId] : [],
+    multiplier: mult,
+    extraLabel: completedFull ? '+20% Focus Bonus' : 'Partial',
+  });
+
+  saveState(state);
+  return res;
 }
 
 export function daysSince(isoDate) {

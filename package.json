@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "description": "Real-life RPG character sheet with Android APK + Health Connect integration",
   "scripts": {
-    "sync-web": "rm -rf www && mkdir -p www && cp -r index.html manifest.json sw.js css js www/",
+    "sync-web": "rm -rf www && mkdir -p www && cp -r index.html manifest.json sw.js css js assets www/",
     "cap:sync": "npm run sync-web && npx cap sync android",
     "android:build": "npm run cap:sync && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
-    "@capacitor/core": "^6.2.0"
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/local-notifications": "^6.1.3"
   },
   "devDependencies": {
     "@capacitor/android": "^6.2.0",

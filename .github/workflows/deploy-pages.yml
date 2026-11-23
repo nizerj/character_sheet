@@ -27,7 +27,7 @@ jobs:
       - name: Prepare static site bundle
         run: |
           mkdir -p _site
-          cp -r index.html manifest.json sw.js css js _site/
+          cp -r index.html manifest.json sw.js css js assets _site/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
