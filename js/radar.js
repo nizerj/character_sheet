@@ -92,7 +92,7 @@ export function renderRadarChart(container, ranks) {
     .join('');
 
   container.innerHTML = `
-    <svg viewBox="0 0 470 345" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Persona 5-Axis Ability Radar">
+    <svg viewBox="0 0 470 345" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="5-Axis Ability Radar">
       <defs>
         <filter id="radarGlow" x="-30%" y="-30%" width="160%" height="160%">
           <feGaussianBlur stdDeviation="4" result="blur"/>

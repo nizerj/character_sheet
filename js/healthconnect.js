@@ -119,9 +119,11 @@ export function applyHealthConnectData(state, payload) {
     state.totalXp += xp;
 
     const skillIds = [];
+    const skillDeltas = {};
     if (fitnessSkill) {
       fitnessSkill.xp = (fitnessSkill.xp || 0) + xp;
       skillIds.push(fitnessSkill.id);
+      skillDeltas[fitnessSkill.id] = xp;
     }
 
     state.logs.unshift({
@@ -130,8 +132,12 @@ export function applyHealthConnectData(state, payload) {
       title: `🏋️ ${title} (Health Connect · ${mins}m)`,
       difficulty: diffId,
       baseXp: xp,
+      totalXpDelta: xp,
+      abilityDeltas: { fitness: xp },
+      skillDeltas,
       abilities: ['fitness'],
       skillIds,
+      hcSessionId: sid,
       timestamp: nowIso,
     });
 

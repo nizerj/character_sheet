@@ -193,7 +193,7 @@ export function renderApp(state, activeTrackerTab = 'today') {
   document.getElementById('cal-date').textContent = `${now.getMonth() + 1}/${now.getDate()}`;
   document.getElementById('cal-day').textContent = dayNames[now.getDay()];
 
-  const lvl = getLevelInfo(state.totalXp);
+  const lvl = getLevelInfo(state.totalXp, state.settings.titleTrack || 'arcana');
   const { ranks, fitCap } = getAbilityRankSnapshot(state);
   const avgRank = getAverageRank(state);
 
@@ -312,10 +312,13 @@ export function renderApp(state, activeTrackerTab = 'today') {
         const m = getSkillMastery(sk.xp);
         const abLabel = ABILITIES.find(a => a.id === sk.linkedAbility)?.label || 'General';
         const glyphs = mode === 'moons' ? renderMoonGlyphs(m.stars) : renderStarGlyphs(m.stars);
+        const iconMarkup = sk.iconImage
+          ? `<img src="${sk.iconImage}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/>`
+          : sk.icon || '✦';
         return `
-          <div class="skill-item">
+          <div class="skill-item" data-edit-skill="${sk.id}" title="Right-click or long-press to edit">
             <div class="skill-left">
-              <div class="skill-icon">${sk.icon || '✦'}</div>
+              <div class="skill-icon" style="overflow:hidden;">${iconMarkup}</div>
               <div style="min-width:0">
                 <div class="skill-name">${escapeHtml(sk.name)}</div>
                 <div class="skill-sub">${abLabel} · ${sk.xp} XP (${m.stars.toFixed(1)}/5)</div>
@@ -359,7 +362,10 @@ export function renderApp(state, activeTrackerTab = 'today') {
             <div class="log-entry ${isPen ? 'penalty' : ''}">
               <div class="task-top">
                 <div class="task-title">${escapeHtml(entry.title)}</div>
-                <div class="task-xp" style="${isPen ? 'color:var(--accent-danger);' : ''}">${xpText}</div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <div class="task-xp" style="${isPen ? 'color:var(--accent-danger);' : ''}">${xpText}</div>
+                  <button class="skill-del" data-delete-log="${entry.id}" title="Delete &amp; reverse XP">✕</button>
+                </div>
               </div>
               <div class="task-meta">
                 <span class="tag ${isPen ? 'tag-penalty' : 'tag-rec'}">${isPen ? (entry.auto ? 'Auto Decay' : 'Penalty') : 'Completed'}</span>

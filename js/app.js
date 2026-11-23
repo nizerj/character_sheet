@@ -4,6 +4,7 @@ import {
   PENALTY_SEVERITIES,
   WEEKDAYS,
   THEMES,
+  TITLE_TRACKS,
 } from './constants.js';
 import {
   loadState,
@@ -12,6 +13,7 @@ import {
   addTask,
   completeTask,
   deleteTask,
+  deleteLogEntry,
   logPenalty,
   runAutoDecayCheck,
   todayKey,
@@ -37,6 +39,8 @@ let state = loadState();
 let activeTrackerTab = 'today';
 let activePage = 'status';
 let pendingAvatarDataUrl = undefined;
+let editingSkillId = null;
+let pendingSkillImage = undefined; // undefined = unchanged, null = clear, string = new 64x64 dataUrl
 let wizStep = 1;
 let wizPhotoDataUrl = null;
 let wizSkills = []; // [{name, icon, linkedAbility}]
@@ -53,7 +57,7 @@ function closeAllModals() {
   });
 }
 
-function compressImageFile(file, maxSize = 320) {
+function compressImageFile(file, maxSize = 320, quality = 0.85) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -64,7 +68,7 @@ function compressImageFile(file, maxSize = 320) {
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = reader.result;
@@ -192,12 +196,40 @@ function populatePenaltyModal() {
           .join('');
 }
 
-function populateSkillModal() {
+function renderSkillImgPreview(dataUrl) {
+  const prev = document.getElementById('skill-icon-preview');
+  if (dataUrl) {
+    prev.style.display = 'flex';
+    prev.innerHTML = `<img src="${dataUrl}" style="width:32px;height:32px;object-fit:cover;border:1px solid var(--accent-gold);"/><span>Custom image ready (compressed)</span>`;
+  } else {
+    prev.style.display = 'none';
+    prev.innerHTML = '';
+  }
+}
+
+function populateSkillModal(skillId = null) {
+  editingSkillId = skillId;
+  pendingSkillImage = undefined;
   document.getElementById('skill-ability').innerHTML = ABILITIES.map(
     ab => `<option value="${ab.id}">${ab.label}</option>`
   ).join('');
-  document.getElementById('skill-name').value = '';
-  document.getElementById('skill-icon').value = '✦';
+  document.getElementById('skill-icon-file').value = '';
+
+  const sk = skillId ? state.skills.find(s => s.id === skillId) : null;
+  if (sk) {
+    document.getElementById('skill-modal-title').textContent = '✎ Edit Skill';
+    document.getElementById('btn-skill-submit').textContent = 'Save Skill';
+    document.getElementById('skill-name').value = sk.name;
+    document.getElementById('skill-icon').value = sk.icon || '✦';
+    document.getElementById('skill-ability').value = sk.linkedAbility || 'productivity';
+    renderSkillImgPreview(sk.iconImage || null);
+  } else {
+    document.getElementById('skill-modal-title').textContent = '+ Add Skill';
+    document.getElementById('btn-skill-submit').textContent = 'Add Skill';
+    document.getElementById('skill-name').value = '';
+    document.getElementById('skill-icon').value = '✦';
+    renderSkillImgPreview(null);
+  }
 }
 
 function populateProfileModal() {
@@ -229,6 +261,11 @@ function populateConfigPage() {
       </button>
     `;
   }).join('');
+
+  const trackSel = document.getElementById('config-title-track');
+  trackSel.innerHTML = Object.values(TITLE_TRACKS)
+    .map(tr => `<option value="${tr.id}" ${(state.settings.titleTrack || 'arcana') === tr.id ? 'selected' : ''}>${tr.label}</option>`)
+    .join('');
 
   const styles = getComputedStyle(document.documentElement);
   document.getElementById('color-primary').value = toHex(state.settings.customColors.primary || styles.getPropertyValue('--accent-primary').trim(), '#7c6df7');
@@ -489,6 +526,20 @@ function bindEvents() {
       return;
     }
 
+    // Delete log entry & reverse XP
+    const delLogBtn = e.target.closest('[data-delete-log]');
+    if (delLogBtn) {
+      if (confirm('Delete this log entry and reverse its XP?')) {
+        const res = deleteLogEntry(state, delLogBtn.dataset.deleteLog);
+        if (res) {
+          renderApp(state, activeTrackerTab);
+          const sign = res.reversedXp >= 0 ? `−${res.reversedXp}` : `+${Math.abs(res.reversedXp)}`;
+          showToast(`Deleted "${res.title}" (${sign} XP)`);
+        }
+      }
+      return;
+    }
+
     // Delete skill
     const delSkillBtn = e.target.closest('[data-delete-skill]');
     if (delSkillBtn) {
@@ -577,18 +628,82 @@ function bindEvents() {
     }
   });
 
-  // Add Skill
+  // Right-click (PC) & Long-press (Mobile) on Skill to Edit
+  document.getElementById('skills-list').addEventListener('contextmenu', e => {
+    const item = e.target.closest('[data-edit-skill]');
+    if (!item || e.target.closest('[data-delete-skill]')) return;
+    e.preventDefault();
+    populateSkillModal(item.dataset.editSkill);
+    openModal('modal-skill');
+  });
+
+  let longPressTimer = null;
+  document.getElementById('skills-list').addEventListener('touchstart', e => {
+    const item = e.target.closest('[data-edit-skill]');
+    if (!item || e.target.closest('[data-delete-skill]')) return;
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      populateSkillModal(item.dataset.editSkill);
+      openModal('modal-skill');
+    }, 520);
+  }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => {
+    document.getElementById('skills-list').addEventListener(ev, () => {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    }, { passive: true });
+  });
+
+  // Skill Custom Compressed Icon Image
+  document.getElementById('skill-icon-file').addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      pendingSkillImage = await compressImageFile(file, 64, 0.72);
+      renderSkillImgPreview(pendingSkillImage);
+    } catch {
+      showToast('Could not read icon image.', 'danger');
+    }
+  });
+  document.getElementById('btn-clear-skill-img').addEventListener('click', () => {
+    pendingSkillImage = null;
+    document.getElementById('skill-icon-file').value = '';
+    renderSkillImgPreview(null);
+  });
+
+  // Add / Edit Skill Submit
   document.getElementById('form-skill').addEventListener('submit', e => {
     e.preventDefault();
     const name = document.getElementById('skill-name').value.trim();
     const icon = document.getElementById('skill-icon').value.trim() || '✦';
     const linkedAbility = document.getElementById('skill-ability').value;
     if (!name) return;
-    state.skills.push({ id: 'sk_' + Date.now(), name, icon, linkedAbility, xp: 0 });
-    saveState(state);
-    closeAllModals();
-    renderApp(state, activeTrackerTab);
-    showToast(`Added skill: ${icon} ${name}`);
+
+    if (editingSkillId) {
+      const sk = state.skills.find(s => s.id === editingSkillId);
+      if (sk) {
+        sk.name = name;
+        sk.icon = icon;
+        sk.linkedAbility = linkedAbility;
+        if (pendingSkillImage !== undefined) sk.iconImage = pendingSkillImage;
+        saveState(state);
+        closeAllModals();
+        renderApp(state, activeTrackerTab);
+        showToast(`Updated skill: ${name}`);
+      }
+    } else {
+      state.skills.push({
+        id: 'sk_' + Date.now(),
+        name,
+        icon,
+        iconImage: pendingSkillImage || null,
+        linkedAbility,
+        xp: 0,
+      });
+      saveState(state);
+      closeAllModals();
+      renderApp(state, activeTrackerTab);
+      showToast(`Added skill: ${icon} ${name}`);
+    }
   });
 
   // Profile Photo Upload & Save
@@ -620,6 +735,14 @@ function bindEvents() {
     closeAllModals();
     renderApp(state, activeTrackerTab);
     showToast('Profile saved!');
+  });
+
+  // Level Title Track selector
+  document.getElementById('config-title-track').addEventListener('change', e => {
+    state.settings.titleTrack = e.target.value;
+    saveState(state);
+    renderApp(state, activeTrackerTab);
+    showToast('Level title progression updated!');
   });
 
   // Live Custom Color Pickers
@@ -690,7 +813,7 @@ function bindEvents() {
       latestBodyFatPct: 14.8,
       workouts: [
         {
-          id: 'sim_hevy_' + Date.now(),
+          id: 'sim_hevy_' + todayKey(),
           title: 'Hevy — Push Day',
           durationMinutes: 62,
           startTime: new Date().toISOString(),
@@ -700,7 +823,11 @@ function bindEvents() {
     });
     renderApp(state, activeTrackerTab);
     populateConfigPage();
-    showToast(`Test Sync: BF ${summary.bodyFatPct}% · +${summary.workoutsImported} Hevy workout (+${summary.totalFitnessXp} Fitness XP)`);
+    if (summary.workoutsImported > 0) {
+      showToast(`Test Sync: BF ${summary.bodyFatPct}% · +1 Hevy workout (+${summary.totalFitnessXp} Fitness XP)`);
+    } else {
+      showToast(`Test Sync: Scale updated (BF ${summary.bodyFatPct}%) — today's test workout already synced.`);
+    }
   });
 
   // Optional Backup Inputs

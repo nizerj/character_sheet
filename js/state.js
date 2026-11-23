@@ -45,6 +45,7 @@ export function createFreshState(keepSettings = null) {
   const now = new Date().toISOString();
   const defaultSettings = {
     theme: 'p5-velvet',
+    titleTrack: 'arcana',
     skillDisplay: 'moons',
     autoDecayEnabled: true,
     customColors: { primary: '', gold: '', radar: '' },
@@ -243,12 +244,16 @@ function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multipl
   const now = new Date().toISOString();
 
   let gainedTotalXp = 0;
+  const abilityDeltas = {};
+  const skillDeltas = {};
+
   abilityIds.forEach((abId, idx) => {
     const secMult = idx === 0 ? 1.0 : 0.6;
     const gain = Math.max(1, Math.round(diff.xp * secMult * multiplier));
     state.abilities[abId].xp = Math.max(0, (state.abilities[abId].xp || 0) + gain);
     state.abilities[abId].lastActivity = now;
     state.abilities[abId].lastDecayDate = now;
+    abilityDeltas[abId] = gain;
     gainedTotalXp += gain;
   });
 
@@ -259,7 +264,9 @@ function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multipl
   skillIds.forEach(skId => {
     const sk = state.skills.find(s => s.id === skId);
     if (sk) {
-      sk.xp = Math.max(0, (sk.xp || 0) + Math.max(1, Math.round(diff.xp * multiplier)));
+      const skGain = Math.max(1, Math.round(diff.xp * multiplier));
+      sk.xp = Math.max(0, (sk.xp || 0) + skGain);
+      skillDeltas[skId] = skGain;
     }
   });
 
@@ -271,6 +278,9 @@ function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multipl
     title: extraLabel ? `${title} (${extraLabel})` : title,
     difficulty: diff.id,
     baseXp: gainedTotalXp,
+    totalXpDelta: gainedTotalXp,
+    abilityDeltas,
+    skillDeltas,
     abilities: [...abilityIds],
     skillIds: [...skillIds],
     timestamp: now,
@@ -380,16 +390,25 @@ export function logPenalty(state, { title, severityId, abilityIds, skillIds = []
   const beforeRanks = getAbilityRankSnapshot(state).ranks;
   const now = new Date().toISOString();
 
+  const abilityDeltas = {};
+  const skillDeltas = {};
+
   abilityIds.forEach(abId => {
     state.abilities[abId].xp = Math.max(0, (state.abilities[abId].xp || 0) - penaltyXp);
+    abilityDeltas[abId] = -penaltyXp;
   });
 
   skillIds.forEach(skId => {
     const sk = state.skills.find(s => s.id === skId);
-    if (sk) sk.xp = Math.max(0, (sk.xp || 0) - Math.round(penaltyXp * 0.7));
+    if (sk) {
+      const skLoss = Math.round(penaltyXp * 0.7);
+      sk.xp = Math.max(0, (sk.xp || 0) - skLoss);
+      skillDeltas[skId] = -skLoss;
+    }
   });
 
-  state.totalXp = Math.max(0, state.totalXp - Math.round(penaltyXp * 0.5));
+  const totalLoss = Math.round(penaltyXp * 0.5);
+  state.totalXp = Math.max(0, state.totalXp - totalLoss);
 
   state.logs.unshift({
     id: 'pen_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
@@ -397,6 +416,9 @@ export function logPenalty(state, { title, severityId, abilityIds, skillIds = []
     title: title.trim(),
     severity: sev.id,
     xpDelta: -penaltyXp,
+    totalXpDelta: -totalLoss,
+    abilityDeltas,
+    skillDeltas,
     abilities: [...abilityIds],
     skillIds: [...skillIds],
     auto,
@@ -413,6 +435,68 @@ export function logPenalty(state, { title, severityId, abilityIds, skillIds = []
 
   saveState(state);
   return { penaltyXp, rankDowns };
+}
+
+// Deletes a log entry and reverses all XP it granted (or refunds XP if it was a penalty)
+export function deleteLogEntry(state, logId) {
+  const idx = state.logs.findIndex(l => l.id === logId);
+  if (idx === -1) return null;
+  const entry = state.logs[idx];
+  const isPen = entry.type === 'penalty';
+
+  // Reverse totalXp
+  const totalDelta =
+    typeof entry.totalXpDelta === 'number'
+      ? entry.totalXpDelta
+      : isPen
+      ? Math.round((entry.xpDelta || 0) * 0.5)
+      : entry.baseXp || 0;
+  state.totalXp = Math.max(0, state.totalXp - totalDelta);
+
+  // Reverse ability XP
+  if (entry.abilityDeltas && Object.keys(entry.abilityDeltas).length > 0) {
+    for (const [abId, delta] of Object.entries(entry.abilityDeltas)) {
+      if (state.abilities[abId]) {
+        state.abilities[abId].xp = Math.max(0, (state.abilities[abId].xp || 0) - delta);
+      }
+    }
+  } else if (Array.isArray(entry.abilities) && entry.abilities.length > 0) {
+    // Fallback for legacy logs
+    if (isPen) {
+      const loss = Math.abs(entry.xpDelta || 0);
+      entry.abilities.forEach(abId => {
+        if (state.abilities[abId]) state.abilities[abId].xp += loss;
+      });
+    } else {
+      const share = Math.round((entry.baseXp || 0) / entry.abilities.length);
+      entry.abilities.forEach(abId => {
+        if (state.abilities[abId]) state.abilities[abId].xp = Math.max(0, state.abilities[abId].xp - share);
+      });
+    }
+  }
+
+  // Reverse skill XP
+  if (entry.skillDeltas && Object.keys(entry.skillDeltas).length > 0) {
+    for (const [skId, delta] of Object.entries(entry.skillDeltas)) {
+      const sk = state.skills.find(s => s.id === skId);
+      if (sk) sk.xp = Math.max(0, (sk.xp || 0) - delta);
+    }
+  } else if (Array.isArray(entry.skillIds) && entry.skillIds.length > 0) {
+    const fallbackDelta = isPen ? -Math.round(Math.abs(entry.xpDelta || 0) * 0.7) : entry.baseXp || 0;
+    entry.skillIds.forEach(skId => {
+      const sk = state.skills.find(s => s.id === skId);
+      if (sk) sk.xp = Math.max(0, (sk.xp || 0) - fallbackDelta);
+    });
+  }
+
+  // If this was a Health Connect workout log, allow re-syncing it if desired
+  if (entry.hcSessionId && state.healthConnect?.syncedWorkoutIds) {
+    state.healthConnect.syncedWorkoutIds = state.healthConnect.syncedWorkoutIds.filter(id => id !== entry.hcSessionId);
+  }
+
+  state.logs.splice(idx, 1);
+  saveState(state);
+  return { title: entry.title, reversedXp: totalDelta };
 }
 
 export function daysSince(isoDate) {

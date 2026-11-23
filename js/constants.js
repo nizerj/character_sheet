@@ -85,22 +85,56 @@ export const SKILL_STEP_THRESHOLDS = [
   0, 60, 150, 280, 450, 670, 950, 1290, 1700, 2180, 2750,
 ];
 
-export const LEVEL_TITLES = [
-  { minLevel: 1,  title: 'Fool' },
-  { minLevel: 4,  title: 'Awakened' },
-  { minLevel: 8,  title: 'Seeker' },
-  { minLevel: 12, title: 'Wild Card' },
-  { minLevel: 18, title: 'Vanguard' },
-  { minLevel: 25, title: 'Architect' },
-  { minLevel: 35, title: 'Sovereign' },
-  { minLevel: 50, title: 'World' },
-];
+export const TITLE_TRACKS = {
+  arcana: {
+    id: 'arcana',
+    label: 'Arcana (Fool → World)',
+    titles: [
+      { minLevel: 1,  title: 'Fool' },
+      { minLevel: 4,  title: 'Awakened' },
+      { minLevel: 8,  title: 'Seeker' },
+      { minLevel: 12, title: 'Wild Card' },
+      { minLevel: 18, title: 'Vanguard' },
+      { minLevel: 25, title: 'Architect' },
+      { minLevel: 35, title: 'Sovereign' },
+      { minLevel: 50, title: 'World' },
+    ],
+  },
+  adventure: {
+    id: 'adventure',
+    label: 'Adventure (Rookie → Legend)',
+    titles: [
+      { minLevel: 1,  title: 'Rookie' },
+      { minLevel: 4,  title: 'Apprentice' },
+      { minLevel: 8,  title: 'Journeyman' },
+      { minLevel: 12, title: 'Adventurer' },
+      { minLevel: 18, title: 'Veteran' },
+      { minLevel: 25, title: 'Expert' },
+      { minLevel: 35, title: 'Master' },
+      { minLevel: 50, title: 'Legend' },
+    ],
+  },
+  tactical: {
+    id: 'tactical',
+    label: 'Tactical (Initiate → Ascendant)',
+    titles: [
+      { minLevel: 1,  title: 'Initiate' },
+      { minLevel: 4,  title: 'Operative' },
+      { minLevel: 8,  title: 'Specialist' },
+      { minLevel: 12, title: 'Tactician' },
+      { minLevel: 18, title: 'Vanguard' },
+      { minLevel: 25, title: 'Commander' },
+      { minLevel: 35, title: 'Apex' },
+      { minLevel: 50, title: 'Ascendant' },
+    ],
+  },
+};
 
 export const THEMES = [
   {
     id: 'p5-phantom',
-    name: 'Phantom Red (P5)',
-    desc: 'Iconic Persona 5 crimson red, jet black, sharp white & gold details.',
+    name: 'Phantom Red',
+    desc: 'Crimson red, jet black, sharp white & gold details.',
     swatches: ['#070709', '#ff1e38', '#ffffff', '#f5c542'],
   },
   {
@@ -111,14 +145,14 @@ export const THEMES = [
   },
   {
     id: 'p3-reload',
-    name: 'Midnight Hour (P3R)',
-    desc: 'Deep midnight navy, electric cyan & crisp white Persona 3 diagonals.',
+    name: 'Midnight Hour',
+    desc: 'Deep midnight navy, electric cyan & crisp white diagonals.',
     swatches: ['#09172e', '#38bdf8', '#f8fafc', '#2dd4bf'],
   },
   {
     id: 'p4-gold',
-    name: 'Midnight Channel (P4)',
-    desc: 'High-contrast obsidian charcoal with iconic Persona electric yellow.',
+    name: 'Midnight Channel',
+    desc: 'High-contrast obsidian charcoal with electric gold & crisp white.',
     swatches: ['#141417', '#facc15', '#f4f4f5', '#f43f5e'],
   },
   {
@@ -264,7 +298,8 @@ export function xpNeededForLevel(level) {
   return Math.round(160 * Math.pow(level, 1.4));
 }
 
-export function getLevelInfo(totalXp) {
+export function getLevelInfo(totalXp, titleTrack = 'arcana') {
+  const track = TITLE_TRACKS[titleTrack] || TITLE_TRACKS.arcana;
   let level = 1;
   let remaining = Math.max(0, Math.floor(totalXp));
   while (true) {
@@ -273,7 +308,7 @@ export function getLevelInfo(totalXp) {
       remaining -= needed;
       level++;
     } else {
-      const titleEntry = [...LEVEL_TITLES].reverse().find(t => level >= t.minLevel) || LEVEL_TITLES[0];
+      const titleEntry = [...track.titles].reverse().find(t => level >= t.minLevel) || track.titles[0];
       return {
         level,
         currentXp: remaining,
