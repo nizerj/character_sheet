@@ -5,6 +5,7 @@ import {
   WEEKDAYS,
   THEMES,
   TITLE_TRACKS,
+  getAbilityIconUrl,
 } from './constants.js';
 import {
   loadState,
@@ -171,6 +172,10 @@ function compressImageFile(file, maxSize = 320, quality = 0.85) {
 // =========================================================================
 // PAGE SWITCHING
 // =========================================================================
+function closeMobileDrawer() {
+  document.getElementById('mobile-drawer')?.classList.remove('open');
+}
+
 function switchPage(page) {
   activePage = page;
   ['status', 'bosses', 'trophies', 'stats', 'config'].forEach(p => {
@@ -180,6 +185,9 @@ function switchPage(page) {
     else el.style.display = 'none';
   });
   document.querySelectorAll('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  const mobLabel = document.getElementById('mobile-nav-label');
+  if (mobLabel) mobLabel.textContent = `☰ ${page.toUpperCase()}`;
+  closeMobileDrawer();
   sfx.click();
   refreshCurrentView();
 }
@@ -208,7 +216,7 @@ function renderWizSkills() {
     .map(
       (s, i) => `
       <span class="tag tag-skill" style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;font-size:11px;">
-        ${s.icon} ${s.name}
+        <img class="chip-skill-icon" src="${getAbilityIconUrl(s.linkedAbility)}" alt="" style="margin-right:0;"/> ${s.name}
         <button type="button" data-wiz-rem-skill="${i}" style="background:none;border:none;color:inherit;cursor:pointer;font-weight:900;">✕</button>
       </span>
     `
@@ -274,7 +282,9 @@ function populateTaskModal() {
   skWrap.innerHTML =
     state.skills.length === 0
       ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
-      : state.skills.map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}">${sk.icon || '✦'} ${sk.name}</button>`).join('');
+      : state.skills
+          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${sk.name}</button>`)
+          .join('');
   updateRecurrenceBoxes();
 }
 
@@ -290,17 +300,15 @@ function populatePenaltyModal() {
   skWrap.innerHTML =
     state.skills.length === 0
       ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
-      : state.skills.map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}">${sk.icon || '✦'} ${sk.name}</button>`).join('');
+      : state.skills
+          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${sk.name}</button>`)
+          .join('');
 }
 
-function renderSkillImgPreview(dataUrl) {
-  const prev = document.getElementById('skill-icon-preview');
-  if (dataUrl) {
-    prev.style.display = 'flex';
-    prev.innerHTML = `<img src="${dataUrl}" style="width:32px;height:32px;object-fit:cover;border:1px solid var(--accent-gold);"/><span>Custom image ready (compressed)</span>`;
-  } else {
-    prev.style.display = 'none';
-    prev.innerHTML = '';
+function renderSkillImgPreview(dataUrl, abilityId) {
+  const img = document.getElementById('skill-icon-preview-img');
+  if (img) {
+    img.src = dataUrl || getAbilityIconUrl(abilityId || document.getElementById('skill-ability')?.value || 'productivity');
   }
 }
 
@@ -317,23 +325,22 @@ function populateSkillModal(skillId = null) {
     document.getElementById('skill-modal-title').textContent = '✎ Edit Skill';
     document.getElementById('btn-skill-submit').textContent = 'Save Skill';
     document.getElementById('skill-name').value = sk.name;
-    document.getElementById('skill-icon').value = sk.icon || '✦';
     document.getElementById('skill-ability').value = sk.linkedAbility || 'productivity';
     document.getElementById('skill-ms-label').value = sk.milestone?.label || '';
     document.getElementById('skill-ms-current').value = sk.milestone?.current ?? '';
     document.getElementById('skill-ms-target').value = sk.milestone?.target ?? '';
     document.getElementById('skill-ms-unit').value = sk.milestone?.unit || '';
-    renderSkillImgPreview(sk.iconImage || null);
+    renderSkillImgPreview(sk.iconImage || null, sk.linkedAbility);
   } else {
     document.getElementById('skill-modal-title').textContent = '+ Add Skill';
     document.getElementById('btn-skill-submit').textContent = 'Add Skill';
     document.getElementById('skill-name').value = '';
-    document.getElementById('skill-icon').value = '✦';
+    document.getElementById('skill-ability').value = 'productivity';
     document.getElementById('skill-ms-label').value = '';
     document.getElementById('skill-ms-current').value = '';
     document.getElementById('skill-ms-target').value = '';
     document.getElementById('skill-ms-unit').value = '';
-    renderSkillImgPreview(null);
+    renderSkillImgPreview(null, 'productivity');
   }
 }
 
@@ -481,6 +488,16 @@ function bindEvents() {
 
   document.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => switchPage(btn.dataset.page));
+  });
+
+  // Mobile Drawer Controls
+  document.getElementById('btn-mobile-drawer')?.addEventListener('click', () => {
+    sfx.click();
+    document.getElementById('mobile-drawer').classList.add('open');
+  });
+  document.getElementById('btn-close-drawer')?.addEventListener('click', closeMobileDrawer);
+  document.getElementById('mobile-drawer')?.addEventListener('click', e => {
+    if (e.target.id === 'mobile-drawer') closeMobileDrawer();
   });
 
   document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', () => {
@@ -671,10 +688,10 @@ function bindEvents() {
   document.body.addEventListener('click', e => {
     const presetBtn = e.target.closest('[data-preset-skill]');
     if (presetBtn) {
-      const [name, icon, linkedAbility] = presetBtn.dataset.presetSkill.split('|');
+      const [name, linkedAbility] = presetBtn.dataset.presetSkill.split('|');
       const idx = wizSkills.findIndex(s => s.name === name);
       if (idx >= 0) { wizSkills.splice(idx, 1); presetBtn.classList.remove('selected-gold'); }
-      else { wizSkills.push({ name, icon, linkedAbility }); presetBtn.classList.add('selected-gold'); }
+      else { wizSkills.push({ name, linkedAbility }); presetBtn.classList.add('selected-gold'); }
       renderWizSkills();
       return;
     }
@@ -987,6 +1004,12 @@ function bindEvents() {
     }, { passive: true });
   });
 
+  document.getElementById('skill-ability').addEventListener('change', e => {
+    const existingImg = editingSkillId ? state.skills.find(s => s.id === editingSkillId)?.iconImage : null;
+    const activeCustom = pendingSkillImage !== undefined ? pendingSkillImage : existingImg;
+    if (!activeCustom) renderSkillImgPreview(null, e.target.value);
+  });
+
   document.getElementById('skill-icon-file').addEventListener('change', async e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1000,13 +1023,12 @@ function bindEvents() {
   document.getElementById('btn-clear-skill-img').addEventListener('click', () => {
     pendingSkillImage = null;
     document.getElementById('skill-icon-file').value = '';
-    renderSkillImgPreview(null);
+    renderSkillImgPreview(null, document.getElementById('skill-ability').value);
   });
 
   document.getElementById('form-skill').addEventListener('submit', e => {
     e.preventDefault();
     const name = document.getElementById('skill-name').value.trim();
-    const icon = document.getElementById('skill-icon').value.trim() || '✦';
     const linkedAbility = document.getElementById('skill-ability').value;
     const msLabel = document.getElementById('skill-ms-label').value.trim();
     const msTarget = Number(document.getElementById('skill-ms-target').value) || 0;
@@ -1019,7 +1041,6 @@ function bindEvents() {
       const sk = state.skills.find(s => s.id === editingSkillId);
       if (sk) {
         sk.name = name;
-        sk.icon = icon;
         sk.linkedAbility = linkedAbility;
         sk.milestone = milestone;
         if (pendingSkillImage !== undefined) sk.iconImage = pendingSkillImage;
@@ -1032,7 +1053,6 @@ function bindEvents() {
       state.skills.push({
         id: 'sk_' + Date.now(),
         name,
-        icon,
         iconImage: pendingSkillImage || null,
         linkedAbility,
         milestone,
@@ -1042,7 +1062,7 @@ function bindEvents() {
       closeAllModals();
       refreshCurrentView();
       checkAchievementsAndNotify();
-      showToast(`Added skill: ${icon} ${name}`);
+      showToast(`Added skill: ${name}`);
     }
   });
 

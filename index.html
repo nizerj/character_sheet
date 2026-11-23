@@ -27,6 +27,9 @@
           <button class="page-nav-btn" data-page="stats"><span>STATS</span></button>
           <button class="page-nav-btn" data-page="config"><span>CONFIG</span></button>
         </nav>
+        <button class="mobile-nav-trigger" id="btn-mobile-drawer" aria-label="Open Navigation Menu">
+          <span id="mobile-nav-label">☰ STATUS</span>
+        </button>
       </div>
 
       <div class="level-hud">
@@ -468,12 +471,12 @@
         <div class="form-group">
           <label class="form-label">Quick-Add Presets</label>
           <div class="chip-selector" id="wiz-skill-presets">
-            <button type="button" class="chip-option" data-preset-skill="Python|🐍|productivity">🐍 Python</button>
-            <button type="button" class="chip-option" data-preset-skill="Philosophy / Reading|📖|culture">📖 Philosophy / Reading</button>
-            <button type="button" class="chip-option" data-preset-skill="Strength Training|⚔️|fitness">⚔️ Strength Training</button>
-            <button type="button" class="chip-option" data-preset-skill="Running|🏃|fitness">🏃 Running</button>
-            <button type="button" class="chip-option" data-preset-skill="University Class|🎓|academics">🎓 University Class</button>
-            <button type="button" class="chip-option" data-preset-skill="Social & Speaking|💬|charisma">💬 Social &amp; Speaking</button>
+            <button type="button" class="chip-option" data-preset-skill="Python|productivity"><img class="chip-skill-icon" src="./assets/skills/productivity.png" alt=""/>Python</button>
+            <button type="button" class="chip-option" data-preset-skill="Philosophy / Reading|culture"><img class="chip-skill-icon" src="./assets/skills/culture.png" alt=""/>Philosophy / Reading</button>
+            <button type="button" class="chip-option" data-preset-skill="Strength Training|fitness"><img class="chip-skill-icon" src="./assets/skills/fitness.png" alt=""/>Strength Training</button>
+            <button type="button" class="chip-option" data-preset-skill="Running|fitness"><img class="chip-skill-icon" src="./assets/skills/fitness.png" alt=""/>Running</button>
+            <button type="button" class="chip-option" data-preset-skill="University Class|academics"><img class="chip-skill-icon" src="./assets/skills/academics.png" alt=""/>University Class</button>
+            <button type="button" class="chip-option" data-preset-skill="Social & Speaking|charisma"><img class="chip-skill-icon" src="./assets/skills/charisma.png" alt=""/>Social &amp; Speaking</button>
           </div>
         </div>
         <div class="form-group">
@@ -655,27 +658,23 @@
         <button class="modal-close" data-close-modal>&times;</button>
       </div>
       <form id="form-skill">
-        <div class="form-group">
-          <label class="form-label" for="skill-name">Skill Name</label>
-          <input class="form-input" id="skill-name" required placeholder="e.g., Python, Calculus II, Sartre, Calisthenics" />
-        </div>
         <div class="form-row-2">
           <div class="form-group">
-            <label class="form-label" for="skill-icon">Emoji / Symbol</label>
-            <input class="form-input" id="skill-icon" value="✦" maxlength="4" />
+            <label class="form-label" for="skill-name">Skill Name</label>
+            <input class="form-input" id="skill-name" required placeholder="e.g., Python, Calculus II, Sartre, Calisthenics" />
           </div>
           <div class="form-group">
-            <label class="form-label" for="skill-ability">Primary Ability</label>
+            <label class="form-label" for="skill-ability">Primary Ability (Default Icon)</label>
             <select class="form-select" id="skill-ability"></select>
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Or Upload Custom Icon Image (Auto-Compressed)</label>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <input type="file" id="skill-icon-file" accept="image/*" class="form-input" style="flex:1;padding:6px;" />
-            <button type="button" class="btn btn-sm" id="btn-clear-skill-img">Clear Image</button>
+          <label class="form-label">Skill Icon (Uses Ability Pixel Badge by Default, or Upload Custom Image)</label>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <img id="skill-icon-preview-img" src="./assets/skills/productivity.png" alt="" style="width:40px;height:40px;image-rendering:pixelated;border:1.5px solid var(--accent-gold);object-fit:cover;flex-shrink:0;" />
+            <input type="file" id="skill-icon-file" accept="image/*" class="form-input" style="flex:1;padding:6px;min-width:160px;" />
+            <button type="button" class="btn btn-sm" id="btn-clear-skill-img">Use Ability Icon</button>
           </div>
-          <div id="skill-icon-preview" style="margin-top:8px;display:none;align-items:center;gap:8px;font-size:11.5px;color:var(--text-muted);"></div>
         </div>
         <div class="recurrence-box" style="margin-bottom:0;">
           <label class="form-label" style="color:var(--accent-gold);">Optional Sub-Quest / Progress Milestone</label>
@@ -870,6 +869,21 @@
         <button type="button" class="btn btn-gold" data-close-modal>Close</button>
       </div>
     </div>
+  </div>
+
+  <!-- MOBILE NAVIGATION DRAWER -->
+  <div class="mobile-drawer-backdrop" id="mobile-drawer">
+    <nav class="mobile-drawer" aria-label="Mobile navigation">
+      <div class="drawer-header">
+        <span class="card-title">MENU</span>
+        <button class="modal-close" id="btn-close-drawer">&times;</button>
+      </div>
+      <button class="drawer-nav-btn active" data-page="status">STATUS</button>
+      <button class="drawer-nav-btn" data-page="bosses">BOSSES</button>
+      <button class="drawer-nav-btn" data-page="trophies">TROPHIES</button>
+      <button class="drawer-nav-btn" data-page="stats">STATS</button>
+      <button class="drawer-nav-btn" data-page="config">CONFIG</button>
+    </nav>
   </div>
 
   <!-- FLOATING FOCUS TIMER BAR -->

@@ -281,6 +281,12 @@ export function getPersonaRankForXp(abilityId, xp, maxRankOverride = null) {
   };
 }
 
+export function getAbilityIconUrl(abilityId) {
+  const valid = ['academics', 'culture', 'fitness', 'charisma', 'productivity'];
+  const key = valid.includes(abilityId) ? abilityId : 'productivity';
+  return `./assets/skills/${key}.png`;
+}
+
 export function getSkillMastery(xp) {
   let step = 0;
   for (let i = 0; i < SKILL_STEP_THRESHOLDS.length; i++) {

@@ -3,6 +3,7 @@ import {
   DIFFICULTIES,
   DEFAULT_PIXEL_AVATAR,
   evaluatePhysiqueTitle,
+  getAbilityIconUrl,
   getLevelInfo,
   getSkillMastery,
 } from './constants.js';
@@ -353,9 +354,8 @@ export function renderApp(state, activeTrackerTab = 'today') {
         const m = getSkillMastery(sk.xp);
         const abLabel = ABILITIES.find(a => a.id === sk.linkedAbility)?.label || 'General';
         const glyphs = mode === 'moons' ? renderMoonGlyphs(m.stars) : renderStarGlyphs(m.stars);
-        const iconMarkup = sk.iconImage
-          ? `<img src="${sk.iconImage}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/>`
-          : sk.icon || '✦';
+        const iconSrc = sk.iconImage || getAbilityIconUrl(sk.linkedAbility);
+        const iconMarkup = `<img src="${iconSrc}" alt="${escapeHtml(abLabel)}"/>`;
         let msHtml = '';
         if (sk.milestone && sk.milestone.target > 0) {
           const cur = Number(sk.milestone.current) || 0;

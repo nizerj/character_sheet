@@ -686,15 +686,31 @@ html, body {
 }
 
 .skill-icon {
-  width: 32px;
-  height: 32px;
-  background: var(--accent-primary-dim);
+  width: 36px;
+  height: 36px;
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.skill-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: pixelated;
+  display: block;
+}
+
+.chip-skill-icon {
+  width: 15px;
+  height: 15px;
+  image-rendering: pixelated;
+  vertical-align: -2px;
+  margin-right: 4px;
 }
 
 .skill-name {
@@ -1213,11 +1229,103 @@ html, body {
   .column-right { grid-column: 1 / -1; }
 }
 
+/* --- MOBILE NAVIGATION DRAWER (HIDDEN ON PC > 780PX) --- */
+.mobile-nav-trigger {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent-primary);
+  color: #070711;
+  border: 1.5px solid var(--text-bright);
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transform: skewX(-10deg);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.6);
+}
+
+.mobile-nav-trigger span {
+  display: inline-block;
+  transform: skewX(10deg);
+}
+
+.mobile-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 5, 12, 0.78);
+  backdrop-filter: blur(5px);
+  z-index: 250;
+  display: none;
+}
+
+.mobile-drawer-backdrop.open {
+  display: block;
+}
+
+.mobile-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 265px;
+  max-width: 82vw;
+  background: var(--bg-card);
+  border-right: 3px solid var(--accent-gold);
+  box-shadow: 8px 0 36px rgba(0, 0, 0, 0.8);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 251;
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  margin-bottom: 6px;
+  border-bottom: 2px solid var(--border-subtle);
+}
+
+.drawer-nav-btn {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-subtle);
+  border-left: 4px solid transparent;
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.drawer-nav-btn.active {
+  background: var(--accent-primary);
+  color: #070711;
+  border-color: var(--text-bright);
+  border-left-color: var(--accent-gold);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
+}
+
 @media (max-width: 780px) {
   .app-container { padding: 12px; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .abilities-strip { grid-template-columns: repeat(3, 1fr); }
   .tutorial-grid, .form-row, .color-pickers { grid-template-columns: 1fr; }
+  .page-nav { display: none; }
+  .mobile-nav-trigger { display: inline-flex; }
+  .topbar { padding: 10px 14px; clip-path: none; }
 }
 
 /* ==========================================================================

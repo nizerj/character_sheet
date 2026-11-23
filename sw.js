@@ -1,10 +1,15 @@
-const CACHE_NAME = 'life-sheet-v2';
+const CACHE_NAME = 'life-sheet-v3';
 const CORE_ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './css/themes.css',
   './css/style.css',
+  './assets/skills/academics.png',
+  './assets/skills/culture.png',
+  './assets/skills/fitness.png',
+  './assets/skills/charisma.png',
+  './assets/skills/productivity.png',
   './js/constants.js',
   './js/state.js',
   './js/radar.js',
