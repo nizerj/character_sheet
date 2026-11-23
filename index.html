@@ -307,8 +307,27 @@
 
       <!-- STEP 1: IDENTITY & PHOTO -->
       <div id="wiz-step-1">
+        <div class="config-subbox" style="margin-bottom:14px;border-left-color:var(--accent-gold);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:12px;font-weight:800;color:var(--text-bright);">Already have a character on another device?</span>
+            <button type="button" class="btn btn-sm btn-gold" id="btn-wiz-toggle-restore">⬇ Restore Backup Account</button>
+          </div>
+          <div id="wiz-restore-panel" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-subtle);">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <label class="btn btn-sm btn-primary" style="cursor:pointer;">
+                ⬆ Import .JSON File
+                <input type="file" id="wiz-import-json" accept="application/json" style="display:none;" />
+              </label>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <input class="form-input" id="wiz-restore-code" placeholder="Or paste Backup Code here..." style="font-size:12px;" />
+              <button type="button" class="btn btn-sm btn-gold" id="btn-wiz-restore-code">Restore</button>
+            </div>
+          </div>
+        </div>
+
         <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px;">
-          Everyone starts at <strong>Level 1</strong> and <strong>Rank 1</strong> across all 5 stats. Set up your profile to begin.
+          New here? Everyone starts at <strong>Level 1</strong> and <strong>Rank 1</strong> across all 5 stats. Set up your profile to begin.
         </p>
         <div class="form-row-2">
           <div class="form-group">

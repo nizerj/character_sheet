@@ -299,6 +299,50 @@ function bindEvents() {
 
   document.getElementById('task-recurrence').addEventListener('change', updateRecurrenceBoxes);
 
+  // Wizard Restore Backup Account (skips tutorial on new browser/device)
+  document.getElementById('btn-wiz-toggle-restore').addEventListener('click', () => {
+    const panel = document.getElementById('wiz-restore-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  });
+
+  document.getElementById('wiz-import-json').addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!parsed.profile || !parsed.abilities) throw new Error('Invalid');
+        parsed.setupCompleted = true;
+        state = parsed;
+        saveState(state);
+        document.getElementById('modal-setup').classList.remove('open');
+        renderApp(state, activeTrackerTab);
+        showToast(`Welcome back, ${state.profile.name || 'Player'}! Backup restored.`);
+      } catch {
+        showToast('Invalid JSON backup file.', 'danger');
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById('btn-wiz-restore-code').addEventListener('click', () => {
+    const code = document.getElementById('wiz-restore-code').value.trim();
+    if (!code) return;
+    try {
+      const parsed = decodeBackupCode(code);
+      parsed.setupCompleted = true;
+      state = parsed;
+      saveState(state);
+      document.getElementById('wiz-restore-code').value = '';
+      document.getElementById('modal-setup').classList.remove('open');
+      renderApp(state, activeTrackerTab);
+      showToast(`Welcome back, ${state.profile.name || 'Player'}! Backup restored.`);
+    } catch {
+      showToast('Invalid backup code.', 'danger');
+    }
+  });
+
   // Wizard Navigation & Controls
   document.getElementById('btn-wiz-next').addEventListener('click', () => {
     if (wizStep < 3) setWizardStep(wizStep + 1);
