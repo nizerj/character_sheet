@@ -1,5 +1,5 @@
 import { ABILITIES } from './constants.js';
-import { todayKey, addDaysKey, getWeekStartKey, getTaskStatus } from './state.js';
+import { todayKey, addDaysKey, getWeekStartKey, isoToLocalDayKey } from './state.js';
 
 // =========================================================================
 // 1. ACTIVITY HEATMAP (LAST 16 WEEKS / 112 DAYS)
@@ -9,7 +9,7 @@ export function renderActivityHeatmap(container, state) {
   const xpByDay = {};
   for (const log of state.logs || []) {
     if (log.type !== 'task' || !log.timestamp) continue;
-    const day = log.timestamp.slice(0, 10);
+    const day = isoToLocalDayKey(log.timestamp);
     counts[day] = (counts[day] || 0) + 1;
     xpByDay[day] = (xpByDay[day] || 0) + (log.baseXp || 0);
   }
@@ -54,7 +54,7 @@ export function renderXpBarChart(container, state) {
     const key = addDaysKey(today, -i);
     let xp = 0;
     for (const log of state.logs || []) {
-      if (log.type === 'task' && log.timestamp?.startsWith(key)) {
+      if (log.type === 'task' && isoToLocalDayKey(log.timestamp) === key) {
         xp += log.baseXp || 0;
       }
     }
@@ -173,8 +173,8 @@ export function buildWeeklyReport(state, usePreviousWeek = false) {
   const abXp = { academics: 0, culture: 0, fitness: 0, charisma: 0, productivity: 0 };
 
   for (const log of state.logs || []) {
-    const day = (log.timestamp || '').slice(0, 10);
-    if (day < startKey || day > endKey) continue;
+    const day = isoToLocalDayKey(log.timestamp);
+    if (!day || day < startKey || day > endKey) continue;
     if (log.type === 'task') {
       tasksDone++;
       gainedXp += log.baseXp || 0;

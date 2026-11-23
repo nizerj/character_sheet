@@ -17,6 +17,15 @@ export function todayKey(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+// Converts an ISO timestamp into the user's LOCAL YYYY-MM-DD calendar day (prevents UTC midnight bugs!)
+export function isoToLocalDayKey(iso) {
+  if (!iso) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return String(iso).slice(0, 10);
+  return todayKey(dt);
+}
+
 export function addDaysKey(dateKey, deltaDays) {
   const [y, m, d] = dateKey.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
@@ -125,33 +134,60 @@ export function createFreshState(keepSettings = null) {
   };
 }
 
+// Deep-normalizes any loaded or imported save file (including older versions) so no fields are ever missing
+export function normalizeState(parsed) {
+  const fresh = createFreshState();
+  if (!parsed || typeof parsed !== 'object') return fresh;
+
+  const mergedAbilities = {};
+  for (const ab of ABILITIES) {
+    const src = parsed.abilities?.[ab.id] || {};
+    mergedAbilities[ab.id] = {
+      ...fresh.abilities[ab.id],
+      ...src,
+      xp: Math.max(0, Number(src.xp) || 0),
+    };
+  }
+
+  return {
+    ...fresh,
+    ...parsed,
+    totalXp: Math.max(0, Number(parsed.totalXp) || 0),
+    profile: { ...fresh.profile, ...(parsed.profile || {}) },
+    settings: {
+      ...fresh.settings,
+      ...(parsed.settings || {}),
+      customColors: { ...fresh.settings.customColors, ...(parsed.settings?.customColors || {}) },
+      graceDays: { ...fresh.settings.graceDays, ...(parsed.settings?.graceDays || {}) },
+      backup: { ...fresh.settings.backup, ...(parsed.settings?.backup || {}) },
+    },
+    abilities: mergedAbilities,
+    skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+    tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+    bosses: Array.isArray(parsed.bosses) ? parsed.bosses : [],
+    logs: Array.isArray(parsed.logs) ? parsed.logs : [],
+    bodyHistory: Array.isArray(parsed.bodyHistory) ? parsed.bodyHistory : [],
+    achievements: {
+      unlocked: { ...(parsed.achievements?.unlocked || {}) },
+    },
+    stats: {
+      ...fresh.stats,
+      ...(parsed.stats || {}),
+      balancedDaysDates: Array.isArray(parsed.stats?.balancedDaysDates) ? parsed.stats.balancedDaysDates : [],
+    },
+    healthConnect: {
+      ...fresh.healthConnect,
+      ...(parsed.healthConnect || {}),
+      syncedWorkoutIds: Array.isArray(parsed.healthConnect?.syncedWorkoutIds) ? parsed.healthConnect.syncedWorkoutIds : [],
+    },
+  };
+}
+
 export function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createFreshState();
-    const parsed = JSON.parse(raw);
-    const fresh = createFreshState();
-    return {
-      ...fresh,
-      ...parsed,
-      profile: { ...fresh.profile, ...(parsed.profile || {}) },
-      settings: {
-        ...fresh.settings,
-        ...(parsed.settings || {}),
-        customColors: { ...fresh.settings.customColors, ...(parsed.settings?.customColors || {}) },
-        graceDays: { ...fresh.settings.graceDays, ...(parsed.settings?.graceDays || {}) },
-        backup: { ...fresh.settings.backup, ...(parsed.settings?.backup || {}) },
-      },
-      abilities: { ...fresh.abilities, ...(parsed.abilities || {}) },
-      skills: Array.isArray(parsed.skills) ? parsed.skills : [],
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-      bosses: Array.isArray(parsed.bosses) ? parsed.bosses : [],
-      logs: Array.isArray(parsed.logs) ? parsed.logs : [],
-      bodyHistory: Array.isArray(parsed.bodyHistory) ? parsed.bodyHistory : [],
-      achievements: { ...fresh.achievements, ...(parsed.achievements || {}) },
-      stats: { ...fresh.stats, ...(parsed.stats || {}) },
-      healthConnect: { ...fresh.healthConnect, ...(parsed.healthConnect || {}) },
-    };
+    return normalizeState(JSON.parse(raw));
   } catch (err) {
     console.warn('Failed to load state:', err);
     return createFreshState();
@@ -189,7 +225,7 @@ export function getTaskStatus(task) {
   const todayDow = new Date().getDay();
   const weekStart = getWeekStartKey();
   const weekEnd = addDaysKey(weekStart, 6);
-  const completions = Array.isArray(task.completions) ? task.completions : [];
+  const completions = Array.isArray(task.completions) ? [...task.completions].sort() : [];
   const doneToday = completions.includes(today);
   const lastDone = completions.length > 0 ? completions[completions.length - 1] : null;
 
@@ -305,14 +341,22 @@ export function getTodayTrainedAbilities(state) {
   const today = todayKey();
   const set = new Set();
   for (const log of state.logs || []) {
-    if (log.type === 'task' && log.timestamp?.startsWith(today)) {
+    if (log.type === 'task' && isoToLocalDayKey(log.timestamp) === today) {
       (log.abilities || []).forEach(a => set.add(a));
     }
   }
   return set;
 }
 
-function updateStreakAndCombo(state) {
+export function getEffectiveStreak(state) {
+  const last = state.stats?.lastActiveDay;
+  if (!last) return 0;
+  const gap = diffDaysKeys(last, todayKey());
+  if (gap > 1) return 0; // Streak expired!
+  return state.stats?.currentStreak || 0;
+}
+
+export function updateStreakAndCombo(state) {
   if (!state.stats) state.stats = {};
   const today = todayKey();
   const last = state.stats.lastActiveDay;
@@ -354,7 +398,7 @@ function updateStreakAndCombo(state) {
 }
 
 // --- AWARD XP HELPER ---
-export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multiplier = 1, extraLabel = '' }) {
+export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multiplier = 1, extraLabel = '', meta = {} }) {
   const diff = DIFFICULTIES.find(d => d.id === difficultyId) || DIFFICULTIES[2];
   const beforeLevel = getLevelInfo(state.totalXp, state.settings?.titleTrack).level;
   const beforeRanks = getAbilityRankSnapshot(state).ranks;
@@ -367,8 +411,9 @@ export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, 
   let gainedTotalXp = 0;
   const abilityDeltas = {};
   const skillDeltas = {};
+  const validAbilities = (abilityIds || []).filter(abId => Boolean(state.abilities[abId]));
 
-  abilityIds.forEach((abId, idx) => {
+  validAbilities.forEach((abId, idx) => {
     const secMult = idx === 0 ? 1.0 : 0.6;
     const gain = Math.max(1, Math.round(diff.xp * secMult * totalMult));
     state.abilities[abId].xp = Math.max(0, (state.abilities[abId].xp || 0) + gain);
@@ -378,11 +423,11 @@ export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, 
     gainedTotalXp += gain;
   });
 
-  if (abilityIds.length === 0) {
+  if (validAbilities.length === 0) {
     gainedTotalXp = Math.max(1, Math.round(diff.xp * totalMult));
   }
 
-  skillIds.forEach(skId => {
+  (skillIds || []).forEach(skId => {
     const sk = state.skills.find(s => s.id === skId);
     if (sk) {
       const skGain = Math.max(1, Math.round(diff.xp * totalMult));
@@ -402,8 +447,9 @@ export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, 
     totalXpDelta: gainedTotalXp,
     abilityDeltas,
     skillDeltas,
-    abilities: [...abilityIds],
-    skillIds: [...skillIds],
+    abilities: [...validAbilities],
+    skillIds: [...(skillIds || [])],
+    ...meta,
     timestamp: now,
   });
 
@@ -462,6 +508,7 @@ export function completeTask(state, taskId) {
         skillIds: task.skillIds || [],
         multiplier: 1.6, // 0.6 check-in + 1.0 quota bonus
         extraLabel: `Goalpost ${newCount}/${status.weeklyTarget} BONUS!`,
+        meta: { taskId: task.id, completionDate: today, wasGoalpostHit: true },
       });
     } else {
       result = applyXpGain(state, {
@@ -471,6 +518,7 @@ export function completeTask(state, taskId) {
         skillIds: task.skillIds || [],
         multiplier: 0.6,
         extraLabel: `Goalpost ${newCount}/${status.weeklyTarget}`,
+        meta: { taskId: task.id, completionDate: today },
       });
     }
   } else {
@@ -480,6 +528,7 @@ export function completeTask(state, taskId) {
       abilityIds: task.abilities || [],
       skillIds: task.skillIds || [],
       multiplier: 1.0,
+      meta: { taskId: task.id, completionDate: today },
     });
   }
 
@@ -521,23 +570,32 @@ export function logPenalty(state, { title, severityId, abilityIds, skillIds = []
 
   const abilityDeltas = {};
   const skillDeltas = {};
+  const validAbilities = (abilityIds || []).filter(abId => Boolean(state.abilities[abId]));
 
-  abilityIds.forEach(abId => {
-    state.abilities[abId].xp = Math.max(0, (state.abilities[abId].xp || 0) - penaltyXp);
-    abilityDeltas[abId] = -penaltyXp;
+  // Record exact clamped XP lost so deleting a penalty never creates free XP!
+  validAbilities.forEach(abId => {
+    const before = state.abilities[abId].xp || 0;
+    const after = Math.max(0, before - penaltyXp);
+    state.abilities[abId].xp = after;
+    abilityDeltas[abId] = after - before; // <= 0
   });
 
-  skillIds.forEach(skId => {
+  (skillIds || []).forEach(skId => {
     const sk = state.skills.find(s => s.id === skId);
     if (sk) {
+      const before = sk.xp || 0;
       const skLoss = Math.round(penaltyXp * 0.7);
-      sk.xp = Math.max(0, (sk.xp || 0) - skLoss);
-      skillDeltas[skId] = -skLoss;
+      const after = Math.max(0, before - skLoss);
+      sk.xp = after;
+      skillDeltas[skId] = after - before; // <= 0
     }
   });
 
+  const beforeTotal = state.totalXp || 0;
   const totalLoss = Math.round(penaltyXp * 0.5);
-  state.totalXp = Math.max(0, state.totalXp - totalLoss);
+  const afterTotal = Math.max(0, beforeTotal - totalLoss);
+  state.totalXp = afterTotal;
+  const actualTotalDelta = afterTotal - beforeTotal; // <= 0
 
   state.logs.unshift({
     id: 'pen_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
@@ -545,11 +603,11 @@ export function logPenalty(state, { title, severityId, abilityIds, skillIds = []
     title: title.trim(),
     severity: sev.id,
     xpDelta: -penaltyXp,
-    totalXpDelta: -totalLoss,
+    totalXpDelta: actualTotalDelta,
     abilityDeltas,
     skillDeltas,
-    abilities: [...abilityIds],
-    skillIds: [...skillIds],
+    abilities: [...validAbilities],
+    skillIds: [...(skillIds || [])],
     auto,
     timestamp: now,
   });
@@ -618,6 +676,18 @@ export function deleteLogEntry(state, logId) {
       const sk = state.skills.find(s => s.id === skId);
       if (sk) sk.xp = Math.max(0, (sk.xp || 0) - fallbackDelta);
     });
+  }
+
+  // If this was a task completion log, also uncheck that completion on the task!
+  if (entry.taskId && entry.completionDate) {
+    const t = (state.tasks || []).find(x => x.id === entry.taskId);
+    if (t && Array.isArray(t.completions)) {
+      const cIdx = t.completions.lastIndexOf(entry.completionDate);
+      if (cIdx !== -1) t.completions.splice(cIdx, 1);
+    }
+    if (entry.wasGoalpostHit && state.stats?.goalpostsHit > 0) {
+      state.stats.goalpostsHit--;
+    }
   }
 
   // If this was a Health Connect workout log, allow re-syncing it if desired

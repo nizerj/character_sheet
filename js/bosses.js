@@ -1,5 +1,4 @@
-import { ABILITIES } from './constants.js';
-import { saveState, todayKey, diffDaysKeys, logPenalty } from './state.js';
+import { saveState, todayKey, diffDaysKeys, logPenalty, applyXpGain } from './state.js';
 
 export const BOSS_TIERS = [
   { id: 'mini', label: 'Mini-Boss (300 HP · +250 XP)', hp: 300, rewardXp: 250, penaltyXp: 80 },
@@ -42,56 +41,30 @@ export function damageBoss(state, bossId, amount, reason = 'Direct Strike') {
   boss.hp = Math.max(0, boss.hp - dmg);
   let defeated = false;
   let rewardXp = 0;
+  let xpResult = null;
 
   if (boss.hp === 0) {
     boss.status = 'defeated';
     boss.resolvedAt = new Date().toISOString();
     defeated = true;
-    rewardXp = boss.rewardXp;
 
     if (!state.stats) state.stats = {};
     state.stats.bossesDefeated = (state.stats.bossesDefeated || 0) + 1;
 
-    // Award Boss Victory XP
-    const ab = boss.abilityId;
-    const now = new Date().toISOString();
-    const abilityDeltas = {};
-    const skillDeltas = {};
-    const skillIds = [];
-
-    if (state.abilities[ab]) {
-      state.abilities[ab].xp = (state.abilities[ab].xp || 0) + rewardXp;
-      state.abilities[ab].lastActivity = now;
-      state.abilities[ab].lastDecayDate = now;
-      abilityDeltas[ab] = rewardXp;
-    }
-    if (boss.skillId) {
-      const sk = state.skills.find(s => s.id === boss.skillId);
-      if (sk) {
-        sk.xp = (sk.xp || 0) + rewardXp;
-        skillIds.push(sk.id);
-        skillDeltas[sk.id] = rewardXp;
-      }
-    }
-    state.totalXp += rewardXp;
-
-    state.logs.unshift({
-      id: 'boss_win_' + Date.now(),
-      type: 'task',
+    // Route Boss Victory XP through applyXpGain (handles Level Up, Rank Up, Streak, Combo & Sleep Buff!)
+    const mult = boss.rewardXp / 190; // relative to heroic base (190 XP)
+    xpResult = applyXpGain(state, {
       title: `⚔️ BOSS DEFEATED: ${boss.title}`,
-      difficulty: 'heroic',
-      baseXp: rewardXp,
-      totalXpDelta: rewardXp,
-      abilityDeltas,
-      skillDeltas,
-      abilities: [ab],
-      skillIds,
-      timestamp: now,
+      difficultyId: 'heroic',
+      abilityIds: [boss.abilityId],
+      skillIds: boss.skillId ? [boss.skillId] : [],
+      multiplier: mult,
     });
+    rewardXp = xpResult.gainedTotalXp;
   }
 
   saveState(state);
-  return { boss, dmg, defeated, rewardXp, reason };
+  return { boss, dmg, defeated, rewardXp, reason, xpResult };
 }
 
 export function toggleBossStep(state, bossId, stepId) {

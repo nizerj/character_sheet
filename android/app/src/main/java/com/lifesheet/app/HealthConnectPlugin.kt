@@ -175,14 +175,15 @@ class HealthConnectPlugin : Plugin() {
                 } catch (_: Exception) {}
                 result.put("workouts", workoutsArr)
 
-                // 5. Sleep (last night)
+                // 5. Sleep (last night / sessions ending today)
                 try {
+                    val sleepStartWindow = now.minus(24L, ChronoUnit.HOURS)
                     val sleepResp = client.readRecords(
-                        ReadRecordsRequest(SleepSessionRecord::class, timeRangeFilter = TimeRangeFilter.between(startSleep, now))
+                        ReadRecordsRequest(SleepSessionRecord::class, timeRangeFilter = TimeRangeFilter.between(sleepStartWindow, now))
                     )
-                    val totalSleepMins = sleepResp.records.sumOf {
-                        Duration.between(it.startTime, it.endTime).toMinutes()
-                    }
+                    val totalSleepMins = sleepResp.records
+                        .filter { !it.endTime.isBefore(startToday) }
+                        .sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
                     if (totalSleepMins > 0) {
                         result.put("lastSleepHours", Math.round((totalSleepMins / 60.0) * 10.0) / 10.0)
                     }

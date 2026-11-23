@@ -281,6 +281,15 @@ export function getPersonaRankForXp(abilityId, xp, maxRankOverride = null) {
   };
 }
 
+export function escapeHtml(str) {
+  return String(str ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 export function getAbilityIconUrl(abilityId) {
   const valid = ['academics', 'culture', 'fitness', 'charisma', 'productivity'];
   const key = valid.includes(abilityId) ? abilityId : 'productivity';

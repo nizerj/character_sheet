@@ -6,9 +6,11 @@ import {
   THEMES,
   TITLE_TRACKS,
   getAbilityIconUrl,
+  escapeHtml,
 } from './constants.js';
 import {
   loadState,
+  normalizeState,
   saveState,
   createFreshState,
   addTask,
@@ -216,7 +218,7 @@ function renderWizSkills() {
     .map(
       (s, i) => `
       <span class="tag tag-skill" style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;font-size:11px;">
-        <img class="chip-skill-icon" src="${getAbilityIconUrl(s.linkedAbility)}" alt="" style="margin-right:0;"/> ${s.name}
+        <img class="chip-skill-icon" src="${getAbilityIconUrl(s.linkedAbility)}" alt="" style="margin-right:0;"/> ${escapeHtml(s.name)}
         <button type="button" data-wiz-rem-skill="${i}" style="background:none;border:none;color:inherit;cursor:pointer;font-weight:900;">✕</button>
       </span>
     `
@@ -283,7 +285,7 @@ function populateTaskModal() {
     state.skills.length === 0
       ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
       : state.skills
-          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${sk.name}</button>`)
+          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${escapeHtml(sk.name)}</button>`)
           .join('');
   updateRecurrenceBoxes();
 }
@@ -301,7 +303,7 @@ function populatePenaltyModal() {
     state.skills.length === 0
       ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
       : state.skills
-          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${sk.name}</button>`)
+          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${escapeHtml(sk.name)}</button>`)
           .join('');
 }
 
@@ -355,18 +357,24 @@ function populateBossModal() {
   ).join('');
   document.getElementById('boss-skill').innerHTML =
     `<option value="">— None —</option>` +
-    state.skills.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    state.skills.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
   document.getElementById('boss-steps').value = '';
 }
 
 function populateTimerModal() {
+  const ts = getTimerState();
   document.getElementById('timer-ability').innerHTML = ABILITIES.map(
     a => `<option value="${a.id}">${a.label}</option>`
   ).join('');
   document.getElementById('timer-skill').innerHTML =
     `<option value="">— None —</option>` +
-    state.skills.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-  updateTimerUI(getTimerState());
+    state.skills.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  // Preserve current timer settings when reopening!
+  document.getElementById('timer-label').value = ts.config.label || 'Deep Focus Session';
+  document.getElementById('timer-minutes').value = ts.config.minutes || 25;
+  document.getElementById('timer-ability').value = ts.config.abilityId || 'productivity';
+  document.getElementById('timer-skill').value = ts.config.skillId || '';
+  updateTimerUI(ts);
 }
 
 function updateTimerUI(ts) {
@@ -521,6 +529,20 @@ function bindEvents() {
 
   document.getElementById('task-recurrence').addEventListener('change', updateRecurrenceBoxes);
 
+  // Live-update clock preview when typing custom minutes while timer is stopped
+  document.getElementById('timer-minutes').addEventListener('change', () => {
+    const ts = getTimerState();
+    if (!ts.running) {
+      configureTimer({
+        minutes: Number(document.getElementById('timer-minutes').value) || 25,
+        label: document.getElementById('timer-label').value.trim() || 'Deep Focus',
+        abilityId: document.getElementById('timer-ability').value,
+        skillId: document.getElementById('timer-skill').value,
+      });
+      updateTimerUI(getTimerState());
+    }
+  });
+
   // --- FOCUS TIMER CONTROLS ---
   document.querySelectorAll('[data-timer-preset]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -600,7 +622,7 @@ function bindEvents() {
         const parsed = JSON.parse(reader.result);
         if (!parsed.profile || !parsed.abilities) throw new Error('Invalid');
         parsed.setupCompleted = true;
-        state = parsed;
+        state = normalizeState(parsed);
         saveState(state);
         document.getElementById('modal-setup').classList.remove('open');
         refreshCurrentView();
@@ -618,7 +640,7 @@ function bindEvents() {
     try {
       const parsed = decodeBackupCode(code);
       parsed.setupCompleted = true;
-      state = parsed;
+      state = normalizeState(parsed);
       saveState(state);
       document.getElementById('wiz-restore-code').value = '';
       document.getElementById('modal-setup').classList.remove('open');
@@ -763,12 +785,13 @@ function bindEvents() {
         if (res.defeated) {
           sfx.bossWin();
           showCutIn({ kicker: 'BOSS DEFEATED!', title: res.boss.title, subtitle: `+${res.rewardXp} Bonus XP`, variant: 'gold' });
+          if (res.xpResult) handleXpCelebration(res.xpResult, res.boss.title);
         } else {
           sfx.bossHit();
           showToast(`⚔️ Dealt −${res.dmg} HP to ${res.boss.title}!`);
+          checkAchievementsAndNotify();
         }
         refreshCurrentView();
-        checkAchievementsAndNotify();
       }
       return;
     }
@@ -782,12 +805,13 @@ function bindEvents() {
         if (res.defeated) {
           sfx.bossWin();
           showCutIn({ kicker: 'BOSS DEFEATED!', title: res.boss.title, subtitle: `+${res.rewardXp} Bonus XP`, variant: 'gold' });
+          if (res.xpResult) handleXpCelebration(res.xpResult, res.boss.title);
         } else {
           sfx.bossHit();
           showToast(`⚔️ Strike! −${res.dmg} HP on ${res.boss.title} (${res.boss.hp} HP left)`);
+          checkAchievementsAndNotify();
         }
         refreshCurrentView();
-        checkAchievementsAndNotify();
       }
       return;
     }
@@ -1266,7 +1290,9 @@ function bindEvents() {
   document.getElementById('btn-drive-restore').addEventListener('click', async () => {
     const clientId = document.getElementById('backup-drive-client').value.trim();
     try {
-      state = await restoreBackupFromDrive(clientId);
+      const restored = await restoreBackupFromDrive(clientId);
+      restored.setupCompleted = true;
+      state = normalizeState(restored);
       saveState(state);
       refreshCurrentView();
       showToast('☁ Restored save from Google Drive!');
@@ -1294,7 +1320,9 @@ function bindEvents() {
     const code = document.getElementById('restore-code-input').value.trim();
     if (!code) return;
     try {
-      state = decodeBackupCode(code);
+      const restored = decodeBackupCode(code);
+      restored.setupCompleted = true;
+      state = normalizeState(restored);
       saveState(state);
       document.getElementById('restore-code-input').value = '';
       refreshCurrentView();
@@ -1311,7 +1339,8 @@ function bindEvents() {
       try {
         const parsed = JSON.parse(reader.result);
         if (!parsed.profile || !parsed.abilities) throw new Error('Invalid');
-        state = parsed;
+        parsed.setupCompleted = true;
+        state = normalizeState(parsed);
         saveState(state);
         refreshCurrentView();
         showToast('Save imported!');

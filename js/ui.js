@@ -12,6 +12,7 @@ import {
   getAverageRank,
   getTaskStatus,
   daysSince,
+  getEffectiveStreak,
   isWellRestedToday,
   isFatiguedToday,
   getTodayTrainedAbilities,
@@ -275,7 +276,7 @@ export function renderApp(state, activeTrackerTab = 'today') {
   const statusList = document.getElementById('status-list');
   const statusItems = [];
 
-  const streak = state.stats?.currentStreak || 0;
+  const streak = getEffectiveStreak(state);
   if (streak >= 1) {
     statusItems.push(`<div class="status-pill buff"><span>🔥 ${streak}-DAY STREAK</span><span>BEST: ${state.stats?.bestStreak || streak}d</span></div>`);
   }
@@ -601,11 +602,12 @@ export function renderTrophiesPage(state, category = 'All') {
 // =========================================================================
 export function renderStatsPage(state) {
   const st = state.stats || {};
+  const liveStreak = getEffectiveStreak(state);
   const focusHrs = ((st.totalFocusMinutes || 0) / 60).toFixed(1);
   const unlockedCount = Object.keys(state.achievements?.unlocked || {}).length;
 
   document.getElementById('stats-summary-row').innerHTML = `
-    <div class="vital-box"><div class="vital-label">Current Streak</div><div class="vital-value" style="color:var(--accent-gold);">🔥 ${st.currentStreak || 0}d</div></div>
+    <div class="vital-box"><div class="vital-label">Current Streak</div><div class="vital-value" style="color:var(--accent-gold);">🔥 ${liveStreak}d</div></div>
     <div class="vital-box"><div class="vital-label">Focus Time</div><div class="vital-value">⏱ ${focusHrs}h</div></div>
     <div class="vital-box"><div class="vital-label">Bosses Slain</div><div class="vital-value" style="color:var(--accent-danger);">⚔️ ${st.bossesDefeated || 0}</div></div>
     <div class="vital-box"><div class="vital-label">Trophies</div><div class="vital-value" style="color:var(--accent-emerald);">★ ${unlockedCount}/${ACHIEVEMENTS.length}</div></div>

@@ -1,4 +1,4 @@
-import { saveState, todayKey, completeTask, recordBodySnapshot } from './state.js';
+import { saveState, todayKey, isoToLocalDayKey, completeTask, recordBodySnapshot, updateStreakAndCombo } from './state.js';
 
 function getNativePlugin() {
   return window.Capacitor?.Plugins?.HealthConnect || null;
@@ -160,6 +160,7 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
       });
       summary.stepBonusAwarded = true;
       summary.totalFitnessXp += stepXp;
+      updateStreakAndCombo(state);
     }
   }
 
@@ -181,7 +182,7 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
     const xp = durationToXp(mins);
     const nowIso = session.endTime || new Date().toISOString();
 
-    const sessionDay = (session.startTime || nowIso).slice(0, 10);
+    const sessionDay = isoToLocalDayKey(session.startTime || nowIso);
     if (fitnessGoalpost && sessionDay === today) {
       const res = completeTask(state, fitnessGoalpost.id);
       if (res) {
@@ -221,6 +222,7 @@ export function applyHealthConnectData(state, payload, { simulated = false } = {
 
     summary.workoutsImported++;
     summary.totalFitnessXp += xp;
+    updateStreakAndCombo(state);
   }
 
   if (state.healthConnect.syncedWorkoutIds.length > 200) {
