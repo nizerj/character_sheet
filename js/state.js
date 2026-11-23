@@ -89,6 +89,15 @@ export function createFreshState(keepSettings = null) {
     },
     settings: keepSettings ? { ...defaultSettings, ...keepSettings } : defaultSettings,
     totalXp: 0,
+    gold: 0,
+    safeRoom: {
+      activeUntil: null,
+      passes: 2,
+    },
+    shopItems: null,
+    redemptions: [],
+    bounties: { date: null, rerollsUsed: 0, items: [] },
+    routines: [],
     abilities: {
       academics:    { xp: 0, lastActivity: now, lastDecayDate: now },
       culture:      { xp: 0, lastActivity: now, lastDecayDate: now },
@@ -153,6 +162,12 @@ export function normalizeState(parsed) {
     ...fresh,
     ...parsed,
     totalXp: Math.max(0, Number(parsed.totalXp) || 0),
+    gold: Math.max(0, Number(parsed.gold) || 0),
+    safeRoom: { ...fresh.safeRoom, ...(parsed.safeRoom || {}) },
+    shopItems: Array.isArray(parsed.shopItems) ? parsed.shopItems : null,
+    redemptions: Array.isArray(parsed.redemptions) ? parsed.redemptions : [],
+    bounties: { ...fresh.bounties, ...(parsed.bounties || {}) },
+    routines: Array.isArray(parsed.routines) ? parsed.routines : [],
     profile: { ...fresh.profile, ...(parsed.profile || {}) },
     settings: {
       ...fresh.settings,
@@ -200,6 +215,60 @@ export function saveState(state) {
   } catch (err) {
     console.error('Failed to save state:', err);
   }
+  syncAndroidWidget(state);
+}
+
+export function syncAndroidWidget(state) {
+  const bridge = typeof window !== 'undefined' ? window.Capacitor?.Plugins?.WidgetBridge : null;
+  if (!bridge) return;
+  try {
+    const lvl = getLevelInfo(state.totalXp || 0, state.settings?.titleTrack).level;
+    const streak = getEffectiveStreak(state);
+    const gold = Math.max(0, Math.round(state.gold || 0));
+    const dueTasks = (state.tasks || []).filter(t => {
+      const st = getTaskStatus(t);
+      const done = t.recurrence === 'one_time' ? st.completedOneTime : st.doneToday;
+      return st.isDueToday && !done;
+    });
+    const pinnedFirst = [...dueTasks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    const topTask = pinnedFirst.length > 0 ? `Next: ${pinnedFirst[0].title}` : 'All tasks clear for today ✓';
+    bridge.updateWidget({ level: lvl, streak, gold, remaining: dueTasks.length, topTask }).catch(() => {});
+  } catch {}
+}
+
+// --- SAFE ROOM (RECOVERY / VACATION FREEZE) ---
+export function isSafeRoomActive(state) {
+  const until = state.safeRoom?.activeUntil;
+  if (!until) return false;
+  return diffDaysKeys(todayKey(), until) >= 0;
+}
+
+export function safeRoomDaysLeft(state) {
+  const until = state.safeRoom?.activeUntil;
+  if (!until) return 0;
+  return Math.max(0, diffDaysKeys(todayKey(), until) + 1);
+}
+
+export function activateSafeRoom(state, days = 3) {
+  if (!state.safeRoom) state.safeRoom = { activeUntil: null, passes: 2 };
+  if ((state.safeRoom.passes || 0) <= 0) {
+    return { ok: false, error: 'No Safe Room Passes left! Buy one in the Reward Shop (200 G).' };
+  }
+  state.safeRoom.passes -= 1;
+  state.safeRoom.activeUntil = addDaysKey(todayKey(), Math.max(1, Number(days) || 3) - 1);
+  saveState(state);
+  return { ok: true, until: state.safeRoom.activeUntil, passesLeft: state.safeRoom.passes };
+}
+
+export function deactivateSafeRoom(state) {
+  if (!state.safeRoom) return;
+  state.safeRoom.activeUntil = null;
+  // Reset lastDecayDate to now so decay doesn't retroactively charge for Safe Room days
+  const nowIso = new Date().toISOString();
+  for (const ab of ABILITIES) {
+    if (state.abilities[ab.id]) state.abilities[ab.id].lastDecayDate = nowIso;
+  }
+  saveState(state);
 }
 
 export function getAbilityRankSnapshot(state) {
@@ -351,6 +420,7 @@ export function getTodayTrainedAbilities(state) {
 export function getEffectiveStreak(state) {
   const last = state.stats?.lastActiveDay;
   if (!last) return 0;
+  if (isSafeRoomActive(state)) return state.stats?.currentStreak || 0;
   const gap = diffDaysKeys(last, todayKey());
   if (gap > 1) return 0; // Streak expired!
   return state.stats?.currentStreak || 0;
@@ -362,7 +432,7 @@ export function updateStreakAndCombo(state) {
   const last = state.stats.lastActiveDay;
 
   if (last !== today) {
-    if (last && diffDaysKeys(last, today) === 1) {
+    if ((last && diffDaysKeys(last, today) === 1) || (last && isSafeRoomActive(state))) {
       state.stats.currentStreak = (state.stats.currentStreak || 0) + 1;
     } else {
       state.stats.currentStreak = 1;
@@ -397,8 +467,8 @@ export function updateStreakAndCombo(state) {
   return { balancedComboTriggered: false, comboBonus: 0 };
 }
 
-// --- AWARD XP HELPER ---
-export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multiplier = 1, extraLabel = '', meta = {} }) {
+// --- AWARD XP & GOLD HELPER ---
+export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, multiplier = 1, extraLabel = '', meta = {}, extraGold = 0 }) {
   const diff = DIFFICULTIES.find(d => d.id === difficultyId) || DIFFICULTIES[2];
   const beforeLevel = getLevelInfo(state.totalXp, state.settings?.titleTrack).level;
   const beforeRanks = getAbilityRankSnapshot(state).ranks;
@@ -436,7 +506,9 @@ export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, 
     }
   });
 
+  const goldEarned = Math.max(5, Math.round(gainedTotalXp * 0.4)) + Math.max(0, Math.round(extraGold || 0));
   state.totalXp += gainedTotalXp;
+  state.gold = (state.gold || 0) + goldEarned;
 
   state.logs.unshift({
     id: 'log_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
@@ -445,6 +517,7 @@ export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, 
     difficulty: diff.id,
     baseXp: gainedTotalXp,
     totalXpDelta: gainedTotalXp,
+    goldDelta: goldEarned,
     abilityDeltas,
     skillDeltas,
     abilities: [...validAbilities],
@@ -468,6 +541,7 @@ export function applyXpGain(state, { title, difficultyId, abilityIds, skillIds, 
 
   return {
     gainedTotalXp,
+    goldEarned,
     leveledUp: afterLevel > beforeLevel,
     newLevel: afterLevel,
     rankUps,
@@ -549,12 +623,92 @@ export function addTask(state, payload) {
     days: payload.days || [],
     intervalDays: Number(payload.intervalDays) || 2,
     weeklyTarget: Number(payload.weeklyTarget) || 4,
+    pinned: false,
     completions: [],
     createdAt: new Date().toISOString(),
   };
   state.tasks.unshift(task);
   saveState(state);
   return task;
+}
+
+export function updateTask(state, taskId, payload) {
+  const task = (state.tasks || []).find(t => t.id === taskId);
+  if (!task) return null;
+  task.title = payload.title.trim();
+  task.difficulty = payload.difficultyId;
+  task.abilities = [...payload.abilityIds];
+  task.skillIds = [...payload.skillIds];
+  task.recurrence = payload.recurrence;
+  task.scope = payload.scope || 'today';
+  task.dueDate = payload.dueDate || todayKey();
+  task.days = payload.days || [];
+  task.intervalDays = Number(payload.intervalDays) || 2;
+  task.weeklyTarget = Number(payload.weeklyTarget) || 4;
+  saveState(state);
+  return task;
+}
+
+export function togglePinTask(state, taskId) {
+  const task = (state.tasks || []).find(t => t.id === taskId);
+  if (!task) return { ok: false };
+  if (task.pinned) {
+    task.pinned = false;
+    saveState(state);
+    return { ok: true, pinned: false };
+  }
+  const pinnedCount = (state.tasks || []).filter(t => t.pinned).length;
+  if (pinnedCount >= 3) {
+    return { ok: false, error: 'You can pin up to 3 Top Priority tasks at once.' };
+  }
+  task.pinned = true;
+  saveState(state);
+  return { ok: true, pinned: true };
+}
+
+export function moveTaskOrder(state, taskId, direction) {
+  const idx = (state.tasks || []).findIndex(t => t.id === taskId);
+  if (idx === -1) return false;
+  const targetIdx = idx + direction;
+  if (targetIdx < 0 || targetIdx >= state.tasks.length) return false;
+  const [item] = state.tasks.splice(idx, 1);
+  state.tasks.splice(targetIdx, 0, item);
+  saveState(state);
+  return true;
+}
+
+// --- ONE-TAP QUICK ROUTINES ---
+export function addRoutine(state, { title, difficultyId, abilityIds, skillIds }) {
+  if (!Array.isArray(state.routines)) state.routines = [];
+  const r = {
+    id: 'rtn_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+    title: title.trim(),
+    difficulty: difficultyId || 'medium',
+    abilities: [...(abilityIds || [])],
+    skillIds: [...(skillIds || [])],
+  };
+  state.routines.push(r);
+  saveState(state);
+  return r;
+}
+
+export function deleteRoutine(state, routineId) {
+  state.routines = (state.routines || []).filter(r => r.id !== routineId);
+  saveState(state);
+}
+
+export function runRoutine(state, routineId) {
+  const r = (state.routines || []).find(x => x.id === routineId);
+  if (!r) return null;
+  const res = applyXpGain(state, {
+    title: `⚡ ${r.title}`,
+    difficultyId: r.difficulty,
+    abilityIds: r.abilities || [],
+    skillIds: r.skillIds || [],
+    multiplier: 1.0,
+  });
+  saveState(state);
+  return { ...res, routine: r };
 }
 
 export function deleteTask(state, taskId) {
@@ -641,6 +795,9 @@ export function deleteLogEntry(state, logId) {
       ? Math.round((entry.xpDelta || 0) * 0.5)
       : entry.baseXp || 0;
   state.totalXp = Math.max(0, state.totalXp - totalDelta);
+  if (typeof entry.goldDelta === 'number' && entry.goldDelta > 0) {
+    state.gold = Math.max(0, (state.gold || 0) - entry.goldDelta);
+  }
 
   // Reverse ability XP
   if (entry.abilityDeltas && Object.keys(entry.abilityDeltas).length > 0) {
@@ -761,6 +918,13 @@ export function daysSince(isoDate) {
 
 export function runAutoDecayCheck(state) {
   if (!state.setupCompleted || !state.settings.autoDecayEnabled) return [];
+  if (isSafeRoomActive(state)) {
+    const nowIso = new Date().toISOString();
+    for (const ab of ABILITIES) {
+      if (state.abilities[ab.id]) state.abilities[ab.id].lastDecayDate = nowIso;
+    }
+    return [];
+  }
   const events = [];
   const nowIso = new Date().toISOString();
 

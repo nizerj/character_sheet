@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_task"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_new_task"
+        android:shortcutLongLabel="@string/shortcut_new_task">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.lifesheet.app"
+            android:targetClass="com.lifesheet.app.MainActivity">
+            <extra android:name="launch_action" android:value="new-task" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="focus_timer"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_focus"
+        android:shortcutLongLabel="@string/shortcut_focus">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.lifesheet.app"
+            android:targetClass="com.lifesheet.app.MainActivity">
+            <extra android:name="launch_action" android:value="focus" />
+        </intent>
+    </shortcut>
+</shortcuts>

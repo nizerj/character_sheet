@@ -14,6 +14,17 @@ import {
   saveState,
   createFreshState,
   addTask,
+  updateTask,
+  togglePinTask,
+  moveTaskOrder,
+  addRoutine,
+  deleteRoutine,
+  runRoutine,
+  isSafeRoomActive,
+  safeRoomDaysLeft,
+  activateSafeRoom,
+  deactivateSafeRoom,
+  syncAndroidWidget,
   completeTask,
   deleteTask,
   deleteLogEntry,
@@ -29,11 +40,15 @@ import {
 import {
   renderApp,
   renderBossesPage,
+  renderShopPage,
   renderTrophiesPage,
   renderStatsPage,
   renderReportMarkup,
   showToast,
 } from './ui.js';
+import { addShopItem, deleteShopItem, redeemShopItem } from './shop.js';
+import { generateDailyBounties, claimBounty } from './bounties.js';
+import { exportCharacterCardPng } from './cardExport.js';
 import {
   downloadJsonBackup,
   encodeBackupCode,
@@ -80,6 +95,7 @@ let activeAchCategory = 'All';
 let reviewPrevWeek = false;
 let pendingAvatarDataUrl = undefined;
 let editingSkillId = null;
+let editingTaskId = null;
 let pendingSkillImage = undefined;
 let wizStep = 1;
 let wizPhotoDataUrl = null;
@@ -101,6 +117,7 @@ function closeAllModals() {
 function refreshCurrentView() {
   renderApp(state, activeTrackerTab);
   if (activePage === 'bosses') renderBossesPage(state);
+  else if (activePage === 'shop') renderShopPage(state);
   else if (activePage === 'trophies') renderTrophiesPage(state, activeAchCategory);
   else if (activePage === 'stats') renderStatsPage(state);
   else if (activePage === 'config') populateConfigPage();
@@ -180,7 +197,7 @@ function closeMobileDrawer() {
 
 function switchPage(page) {
   activePage = page;
-  ['status', 'bosses', 'trophies', 'stats', 'config'].forEach(p => {
+  ['status', 'bosses', 'shop', 'trophies', 'stats', 'config'].forEach(p => {
     const el = document.getElementById(`view-${p}`);
     if (!el) return;
     if (p === page) el.style.display = p === 'status' ? 'grid' : 'block';
@@ -262,32 +279,72 @@ function updateRecurrenceBoxes() {
   });
 }
 
-function populateTaskModal() {
-  document.getElementById('task-title').value = '';
+function populateTaskModal(taskId = null) {
+  editingTaskId = taskId;
+  const existing = taskId ? (state.tasks || []).find(t => t.id === taskId) : null;
+
+  document.getElementById('task-modal-title').textContent = existing ? '✎ Edit Task / Habit' : '+ New Task / Habit';
+  document.getElementById('btn-task-submit').textContent = existing ? 'Save Task' : 'Create Task';
+
+  document.getElementById('task-title').value = existing ? existing.title : '';
   document.getElementById('task-difficulty').innerHTML = DIFFICULTIES.map(
-    d => `<option value="${d.id}" ${d.id === 'medium' ? 'selected' : ''}>${d.label} (+${d.xp} XP) — ${d.desc}</option>`
+    d => `<option value="${d.id}" ${(existing ? existing.difficulty : 'medium') === d.id ? 'selected' : ''}>${d.label} (+${d.xp} XP) — ${d.desc}</option>`
   ).join('');
-  document.getElementById('task-recurrence').value = 'one_time';
-  document.getElementById('task-scope').value = 'today';
-  document.getElementById('task-due-date').value = todayKey();
-  document.getElementById('task-interval').value = 2;
-  document.getElementById('task-weekly-target').value = 4;
+  document.getElementById('task-recurrence').value = existing ? existing.recurrence : 'one_time';
+  document.getElementById('task-scope').value = existing ? (existing.scope || 'today') : 'today';
+  document.getElementById('task-due-date').value = existing ? (existing.dueDate || todayKey()) : todayKey();
+  document.getElementById('task-interval').value = existing ? (existing.intervalDays || 2) : 2;
+  document.getElementById('task-weekly-target').value = existing ? (existing.weeklyTarget || 4) : 4;
 
+  const selDays = existing?.days || [];
   document.getElementById('task-weekday-chips').innerHTML = WEEKDAYS.map(
-    w => `<button type="button" class="chip-option" data-weekday="${w.idx}">${w.short}</button>`
-  ).join('');
-  document.getElementById('task-ability-chips').innerHTML = ABILITIES.map(
-    ab => `<button type="button" class="chip-option" data-ability="${ab.id}">${ab.label}</button>`
+    w => `<button type="button" class="chip-option ${selDays.includes(w.idx) ? 'selected' : ''}" data-weekday="${w.idx}">${w.short}</button>`
   ).join('');
 
+  const selAbs = existing?.abilities || [];
+  document.getElementById('task-ability-chips').innerHTML = ABILITIES.map(
+    ab => `<button type="button" class="chip-option ${selAbs.includes(ab.id) ? 'selected' : ''}" data-ability="${ab.id}">${ab.label}</button>`
+  ).join('');
+
+  const selSkills = existing?.skillIds || [];
   const skWrap = document.getElementById('task-skill-chips');
   skWrap.innerHTML =
     state.skills.length === 0
       ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
       : state.skills
-          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${escapeHtml(sk.name)}</button>`)
+          .map(
+            sk =>
+              `<button type="button" class="chip-option ${selSkills.includes(sk.id) ? 'selected-gold' : ''}" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${escapeHtml(sk.name)}</button>`
+          )
           .join('');
   updateRecurrenceBoxes();
+}
+
+function populateSafeRoomModal() {
+  const active = isSafeRoomActive(state);
+  const passes = state.safeRoom?.passes ?? 2;
+  const statusEl = document.getElementById('saferoom-modal-status');
+  statusEl.innerHTML = active
+    ? `<strong>🛡 ACTIVE</strong> — Decay frozen &amp; streak protected for <strong>${safeRoomDaysLeft(state)} more day(s)</strong> (until ${state.safeRoom.activeUntil}).<br/>Remaining Passes: <strong>${passes}</strong>`
+    : `Safe Room is currently <strong>OFF</strong>.<br/>Available Recovery Passes: <strong style="color:var(--accent-gold);">${passes}</strong> (buy more in the Reward Shop for 200 G).`;
+  document.getElementById('btn-saferoom-off').style.display = active ? 'inline-flex' : 'none';
+  document.getElementById('btn-saferoom-activate').disabled = active || passes <= 0;
+}
+
+function populateRoutineModal() {
+  document.getElementById('rtn-title').value = '';
+  document.getElementById('rtn-difficulty').innerHTML = DIFFICULTIES.map(
+    d => `<option value="${d.id}" ${d.id === 'medium' ? 'selected' : ''}>${d.label} (+${d.xp} XP)</option>`
+  ).join('');
+  document.getElementById('rtn-ability-chips').innerHTML = ABILITIES.map(
+    ab => `<button type="button" class="chip-option" data-ability="${ab.id}">${ab.label}</button>`
+  ).join('');
+  document.getElementById('rtn-skill-chips').innerHTML =
+    state.skills.length === 0
+      ? `<span style="font-size:12px;color:var(--text-muted);">No skills added yet.</span>`
+      : state.skills
+          .map(sk => `<button type="button" class="chip-option" data-skill="${sk.id}"><img class="chip-skill-icon" src="${sk.iconImage || getAbilityIconUrl(sk.linkedAbility)}" alt=""/>${escapeHtml(sk.name)}</button>`)
+          .join('');
 }
 
 function populatePenaltyModal() {
@@ -475,6 +532,73 @@ function bindEvents() {
 
   document.getElementById('btn-open-task').addEventListener('click', openTask);
   document.getElementById('btn-quick-task').addEventListener('click', openTask);
+  document.getElementById('hud-gold').addEventListener('click', () => switchPage('shop'));
+  document.getElementById('btn-open-saferoom').addEventListener('click', () => { populateSafeRoomModal(); openModal('modal-saferoom'); });
+  document.getElementById('btn-open-routine').addEventListener('click', () => { populateRoutineModal(); openModal('modal-routine'); });
+  document.getElementById('btn-open-shop-item').addEventListener('click', () => {
+    document.getElementById('shop-item-name').value = '';
+    document.getElementById('shop-item-cost').value = 100;
+    document.getElementById('shop-item-desc').value = '';
+    openModal('modal-shop-item');
+  });
+  document.getElementById('btn-export-card').addEventListener('click', async () => {
+    sfx.click();
+    showToast('Rendering Character Card PNG...');
+    try {
+      const fn = await exportCharacterCardPng(state);
+      showToast(`📷 Exported ${fn}!`);
+    } catch {
+      showToast('Could not export card.', 'danger');
+    }
+  });
+  document.getElementById('btn-reroll-bounties').addEventListener('click', () => {
+    const res = generateDailyBounties(state, true);
+    if (!res) { showToast('Daily free reroll already used.', 'danger'); return; }
+    sfx.click();
+    refreshCurrentView();
+    showToast('🎯 Rolled 3 fresh Daily Bounties!');
+  });
+  document.getElementById('btn-saferoom-activate').addEventListener('click', () => {
+    const days = Number(document.getElementById('saferoom-days').value) || 3;
+    const res = activateSafeRoom(state, days);
+    if (!res.ok) { showToast(res.error, 'danger'); return; }
+    sfx.achievement();
+    closeAllModals();
+    refreshCurrentView();
+    showToast(`🛡 Safe Room active for ${days} day(s)! Decay paused & streak protected.`);
+  });
+  document.getElementById('btn-saferoom-off').addEventListener('click', () => {
+    deactivateSafeRoom(state);
+    closeAllModals();
+    refreshCurrentView();
+    showToast('Safe Room deactivated — back in action!');
+  });
+  document.getElementById('form-routine').addEventListener('submit', e => {
+    e.preventDefault();
+    const title = document.getElementById('rtn-title').value.trim();
+    const difficultyId = document.getElementById('rtn-difficulty').value;
+    const abilityIds = [...document.querySelectorAll('#rtn-ability-chips .chip-option.selected')].map(c => c.dataset.ability);
+    const skillIds = [...document.querySelectorAll('#rtn-skill-chips .chip-option.selected-gold')].map(c => c.dataset.skill);
+    if (abilityIds.length === 0 && skillIds.length === 0) {
+      showToast('Select at least one Ability or Skill.', 'danger');
+      return;
+    }
+    addRoutine(state, { title, difficultyId, abilityIds, skillIds });
+    closeAllModals();
+    refreshCurrentView();
+    showToast(`⚡ Added 1-tap routine: "${title}"`);
+  });
+  document.getElementById('form-shop-item').addEventListener('submit', e => {
+    e.preventDefault();
+    const name = document.getElementById('shop-item-name').value.trim();
+    const cost = Number(document.getElementById('shop-item-cost').value) || 100;
+    const desc = document.getElementById('shop-item-desc').value.trim();
+    if (!name) return;
+    addShopItem(state, { name, cost, desc });
+    closeAllModals();
+    refreshCurrentView();
+    showToast(`Added "${name}" (${cost} G) to Shop!`);
+  });
   document.getElementById('btn-open-penalty').addEventListener('click', openPenalty);
   document.getElementById('btn-open-profile').addEventListener('click', openProfile);
   document.getElementById('avatar-container').addEventListener('click', openProfile);
@@ -843,6 +967,85 @@ function bindEvents() {
       return;
     }
 
+    // Claim Daily Bounty
+    const claimBty = e.target.closest('[data-claim-bounty]');
+    if (claimBty) {
+      const res = claimBounty(state, claimBty.dataset.claimBounty);
+      if (res) {
+        sfx.taskDone();
+        refreshCurrentView();
+        showToast(`🎯 Bounty claimed! +${res.gainedTotalXp} XP · +${res.goldEarned} G`);
+        handleXpCelebration(res, res.bounty.title);
+      }
+      return;
+    }
+
+    // Delete or 1-Tap Run Quick Routine
+    const delRtn = e.target.closest('[data-del-routine]');
+    if (delRtn) {
+      e.stopPropagation();
+      if (confirm('Delete this Quick Routine?')) {
+        deleteRoutine(state, delRtn.dataset.delRoutine);
+        refreshCurrentView();
+      }
+      return;
+    }
+    const runRtn = e.target.closest('[data-run-routine]');
+    if (runRtn) {
+      const res = runRoutine(state, runRtn.dataset.runRoutine);
+      if (res) {
+        sfx.taskDone();
+        applyTaskDamageToMatchingBosses(state, res.routine.abilities, res.routine.skillIds, res.gainedTotalXp);
+        refreshCurrentView();
+        showToast(`⚡ ${res.routine.title}: +${res.gainedTotalXp} XP · +${res.goldEarned} G`);
+        handleXpCelebration(res, res.routine.title);
+      }
+      return;
+    }
+
+    // Shop Redeem & Delete
+    const redeemBtn = e.target.closest('[data-redeem-shop]');
+    if (redeemBtn) {
+      const res = redeemShopItem(state, redeemBtn.dataset.redeemShop);
+      if (!res.ok) { showToast(res.error, 'danger'); return; }
+      sfx.achievement();
+      refreshCurrentView();
+      showToast(`🪙 Redeemed "${res.item.name}" (−${res.item.cost} G)!`);
+      return;
+    }
+    const delShop = e.target.closest('[data-del-shop]');
+    if (delShop) {
+      if (confirm('Remove this reward from the Shop?')) {
+        deleteShopItem(state, delShop.dataset.delShop);
+        refreshCurrentView();
+      }
+      return;
+    }
+
+    // Task Pin, Edit & Reorder
+    const pinBtn = e.target.closest('[data-pin-task]');
+    if (pinBtn) {
+      const res = togglePinTask(state, pinBtn.dataset.pinTask);
+      if (!res.ok && res.error) showToast(res.error, 'danger');
+      else { sfx.click(); refreshCurrentView(); }
+      return;
+    }
+    const editTaskBtn = e.target.closest('[data-edit-task]');
+    if (editTaskBtn) {
+      populateTaskModal(editTaskBtn.dataset.editTask);
+      openModal('modal-task');
+      return;
+    }
+    const moveTaskBtn = e.target.closest('[data-move-task]');
+    if (moveTaskBtn) {
+      const [tid, dir] = moveTaskBtn.dataset.moveTask.split('|');
+      if (moveTaskOrder(state, tid, Number(dir))) {
+        sfx.click();
+        refreshCurrentView();
+      }
+      return;
+    }
+
     // Complete task (1-click)
     const completeBtn = e.target.closest('[data-complete-task]');
     if (completeBtn) {
@@ -957,11 +1160,19 @@ function bindEvents() {
       return;
     }
 
-    addTask(state, { title, difficultyId, recurrence, scope, dueDate, days, intervalDays, weeklyTarget, abilityIds, skillIds });
-    closeAllModals();
-    if (recurrence !== 'one_time' && activeTrackerTab === 'log') activeTrackerTab = 'today';
-    refreshCurrentView();
-    showToast(`Added task: "${title}"`);
+    if (editingTaskId) {
+      updateTask(state, editingTaskId, { title, difficultyId, recurrence, scope, dueDate, days, intervalDays, weeklyTarget, abilityIds, skillIds });
+      editingTaskId = null;
+      closeAllModals();
+      refreshCurrentView();
+      showToast(`Updated task: "${title}"`);
+    } else {
+      addTask(state, { title, difficultyId, recurrence, scope, dueDate, days, intervalDays, weeklyTarget, abilityIds, skillIds });
+      closeAllModals();
+      if (recurrence !== 'one_time' && activeTrackerTab === 'log') activeTrackerTab = 'today';
+      refreshCurrentView();
+      showToast(`Added task: "${title}"`);
+    }
   });
 
   // Summon New Boss
@@ -1370,6 +1581,58 @@ bindEvents();
 const decayEvents = runAutoDecayCheck(state);
 const expiredBosses = checkExpiredBosses(state);
 renderApp(state, activeTrackerTab);
+syncAndroidWidget(state);
+
+// --- ANDROID HARDWARE BACK BUTTON (GO TO STATUS FIRST, DOUBLE-TAP TO EXIT) ---
+const capApp = window.Capacitor?.Plugins?.App;
+if (capApp?.addListener) {
+  let lastBackPress = 0;
+  capApp.addListener('backButton', () => {
+    const drawerOpen = document.getElementById('mobile-drawer')?.classList.contains('open');
+    if (drawerOpen) { closeMobileDrawer(); return; }
+
+    const openModals = [...document.querySelectorAll('.modal-backdrop.open')];
+    if (openModals.length > 0) {
+      if (state.setupCompleted) closeAllModals();
+      return;
+    }
+
+    if (activePage !== 'status') {
+      switchPage('status');
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastBackPress < 2200) {
+      capApp.exitApp();
+    } else {
+      lastBackPress = now;
+      showToast('Press Back again to exit');
+    }
+  });
+}
+
+// --- ANDROID HOME SCREEN WIDGET & SHORTCUT DEEP-LINKS ---
+function checkWidgetLaunchAction() {
+  const wb = window.Capacitor?.Plugins?.WidgetBridge;
+  if (!wb?.consumeLaunchAction) return;
+  wb.consumeLaunchAction()
+    .then(res => {
+      if (!state.setupCompleted) return;
+      if (res?.action === 'new-task') {
+        populateTaskModal();
+        openModal('modal-task');
+      } else if (res?.action === 'focus') {
+        populateTimerModal();
+        openModal('modal-timer');
+      }
+    })
+    .catch(() => {});
+}
+checkWidgetLaunchAction();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkWidgetLaunchAction();
+});
 
 if (!state.setupCompleted) {
   openSetupWizard(false);

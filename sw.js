@@ -1,10 +1,11 @@
-const CACHE_NAME = 'life-sheet-v4';
+const CACHE_NAME = 'life-sheet-v5';
 const CORE_ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './css/themes.css',
   './css/style.css',
+  './assets/icon-192.png',
   './assets/skills/academics.png',
   './assets/skills/culture.png',
   './assets/skills/fitness.png',
@@ -18,6 +19,9 @@ const CORE_ASSETS = [
   './js/audio.js',
   './js/achievements.js',
   './js/bosses.js',
+  './js/shop.js',
+  './js/bounties.js',
+  './js/cardExport.js',
   './js/timer.js',
   './js/analytics.js',
   './js/notifications.js',

@@ -13,6 +13,8 @@ import {
   getTaskStatus,
   daysSince,
   getEffectiveStreak,
+  isSafeRoomActive,
+  safeRoomDaysLeft,
   isWellRestedToday,
   isFatiguedToday,
   getTodayTrainedAbilities,
@@ -21,6 +23,8 @@ import {
 import { renderRadarChart } from './radar.js';
 import { ACHIEVEMENTS, getBadgeUrl, getUnlockedTitles } from './achievements.js';
 import { daysLeftLabel } from './bosses.js';
+import { ensureShopState } from './shop.js';
+import { generateDailyBounties } from './bounties.js';
 import {
   renderActivityHeatmap,
   renderXpBarChart,
@@ -171,7 +175,7 @@ function renderTaskCard(task, state) {
   }
 
   const statusTagClass = st.overdueDays > 0 ? 'tag-overdue' : 'tag-due';
-  const cardExtraClass = `${isDone ? 'done' : ''} ${st.goalpostReached ? 'goalpost-hit' : ''}`;
+  const cardExtraClass = `${isDone ? 'done' : ''} ${st.goalpostReached ? 'goalpost-hit' : ''} ${task.pinned ? 'pinned' : ''}`;
 
   return `
     <div class="task-card ${cardExtraClass}">
@@ -180,9 +184,13 @@ function renderTaskCard(task, state) {
       </button>
       <div class="task-body">
         <div class="task-top">
-          <div class="task-title">${escapeHtml(task.title)}</div>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span class="task-xp">${xpPreview}</span>
+          <div class="task-title">${task.pinned ? '<span style="color:var(--accent-gold);margin-right:4px;">★</span>' : ''}${escapeHtml(task.title)}</div>
+          <div class="task-mini-actions">
+            <span class="task-xp" style="margin-right:4px;">${xpPreview}</span>
+            <button class="task-icon-btn ${task.pinned ? 'pinned-active' : ''}" data-pin-task="${task.id}" title="${task.pinned ? 'Unpin' : 'Pin Top Priority (max 3)'}">📌</button>
+            <button class="task-icon-btn" data-edit-task="${task.id}" title="Edit task">✎</button>
+            <button class="task-icon-btn" data-move-task="${task.id}|-1" title="Move up">▲</button>
+            <button class="task-icon-btn" data-move-task="${task.id}|1" title="Move down">▼</button>
             <button class="skill-del" data-delete-task="${task.id}" title="Delete task">✕</button>
           </div>
         </div>
@@ -211,11 +219,24 @@ export function renderApp(state, activeTrackerTab = 'today') {
   const { ranks, fitCap } = getAbilityRankSnapshot(state);
   const avgRank = getAverageRank(state);
 
-  // Level HUD
+  // Level HUD & Gold
   document.getElementById('hud-level').textContent = `LV.${lvl.level}`;
   document.getElementById('hud-title').textContent = state.profile.customClass || lvl.title;
   document.getElementById('hud-xp-text').textContent = `${lvl.currentXp.toLocaleString()} / ${lvl.neededXp.toLocaleString()} XP`;
   document.getElementById('hud-xp-fill').style.width = `${lvl.pct.toFixed(1)}%`;
+  const goldEl = document.getElementById('hud-gold');
+  if (goldEl) goldEl.textContent = `${Math.round(state.gold || 0).toLocaleString()} G`;
+
+  // Safe Room Banner
+  const srBanner = document.getElementById('saferoom-banner');
+  if (srBanner) {
+    if (isSafeRoomActive(state)) {
+      srBanner.style.display = 'flex';
+      srBanner.innerHTML = `<span>🛡 SAFE ROOM ACTIVE (${safeRoomDaysLeft(state)}d left)</span><span>DECAY PAUSED</span>`;
+    } else {
+      srBanner.style.display = 'none';
+    }
+  }
 
   // Profile Card
   const avatarBox = document.getElementById('avatar-container');
@@ -394,6 +415,52 @@ export function renderApp(state, activeTrackerTab = 'today') {
       .join('');
   }
 
+  // Daily Bounties
+  const bountiesData = generateDailyBounties(state, false);
+  const bountyList = document.getElementById('bounty-list');
+  if (bountyList && bountiesData) {
+    bountyList.innerHTML = (bountiesData.items || [])
+      .map(b => {
+        const abLabel = ABILITIES.find(a => a.id === b.abilityId)?.short || b.abilityId;
+        return `
+          <div class="bounty-row ${b.claimed ? 'claimed' : ''}">
+            <div style="min-width:0;">
+              <div style="font-weight:800;color:var(--text-bright);">${escapeHtml(b.title)}</div>
+              <div style="font-size:10px;color:var(--text-muted);font-family:monospace;margin-top:2px;">+${abLabel} · +${b.xp} XP · +${b.gold} G</div>
+            </div>
+            <button class="btn btn-sm ${b.claimed ? '' : 'btn-gold'}" data-claim-bounty="${b.id}" ${b.claimed ? 'disabled' : ''}>${b.claimed ? '✓' : 'Claim'}</button>
+          </div>
+        `;
+      })
+      .join('');
+    const rerollBtn = document.getElementById('btn-reroll-bounties');
+    if (rerollBtn) {
+      rerollBtn.disabled = (bountiesData.rerollsUsed || 0) >= 1;
+      rerollBtn.textContent = (bountiesData.rerollsUsed || 0) >= 1 ? 'Rerolled' : '↻ Reroll';
+    }
+  }
+
+  // Quick-Log 1-Tap Routines Bar
+  const rBar = document.getElementById('routines-bar');
+  const routines = state.routines || [];
+  if (rBar) {
+    if (routines.length === 0) {
+      rBar.style.display = 'none';
+    } else {
+      rBar.style.display = 'flex';
+      rBar.innerHTML = routines
+        .map(
+          r => `
+          <span class="routine-chip" data-run-routine="${r.id}" title="1-tap log routine">
+            ⚡ ${escapeHtml(r.title)}
+            <button type="button" class="skill-del" data-del-routine="${r.id}" style="padding:0 2px;font-size:11px;" title="Delete routine">✕</button>
+          </span>
+        `
+        )
+        .join('');
+    }
+  }
+
   // Task Tracker / Chronicle Panel
   const listEl = document.getElementById('task-list');
   document.querySelectorAll('[data-tracker-tab]').forEach(btn => {
@@ -449,14 +516,17 @@ export function renderApp(state, activeTrackerTab = 'today') {
     return true;
   });
 
-  // Sort: unchecked first, overdue first
+  // Sort: unchecked first, pinned Priority Top 3 first, then preserve user manual order!
   filteredTasks.sort((a, b) => {
     const sa = getTaskStatus(a);
     const sb = getTaskStatus(b);
     const da = a.recurrence === 'one_time' ? sa.completedOneTime : sa.doneToday;
     const db = b.recurrence === 'one_time' ? sb.completedOneTime : sb.doneToday;
     if (da !== db) return da ? 1 : -1;
-    return sb.overdueDays - sa.overdueDays;
+    const pa = a.pinned ? 1 : 0;
+    const pb = b.pinned ? 1 : 0;
+    if (pa !== pb) return pb - pa;
+    return 0;
   });
 
   if (filteredTasks.length === 0) {
@@ -640,4 +710,51 @@ export function renderReportMarkup(rep) {
       <div class="vital-box"><div class="vital-label">Goalposts</div><div class="vital-value" style="font-size:12px;">${rep.goalpostsHit} / ${rep.goalpostsTotal}</div></div>
     </div>
   `;
+}
+
+// =========================================================================
+// REWARD SHOP PAGE RENDERER
+// =========================================================================
+export function renderShopPage(state) {
+  ensureShopState(state);
+  const gold = Math.round(state.gold || 0);
+  document.getElementById('shop-gold-balance').textContent = `${gold.toLocaleString()} G`;
+
+  document.getElementById('shop-grid').innerHTML = state.shopItems
+    .map(item => {
+      const canAfford = gold >= item.cost;
+      return `
+        <div class="shop-card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div style="font-size:14.5px;font-weight:900;color:var(--text-bright);">${escapeHtml(item.name)}</div>
+            ${item.special ? '' : `<button class="skill-del" data-del-shop="${item.id}" title="Remove reward">✕</button>`}
+          </div>
+          <div style="font-size:11.5px;color:var(--text-muted);flex:1;">${escapeHtml(item.desc || 'Personal reward')}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+            <span style="font-family:monospace;font-size:15px;font-weight:900;color:var(--accent-gold);">${item.cost} G</span>
+            <button class="btn btn-sm ${canAfford ? 'btn-gold' : ''}" data-redeem-shop="${item.id}" ${canAfford ? '' : 'disabled'}>Redeem</button>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  const redList = document.getElementById('shop-redemptions');
+  if (!state.redemptions || state.redemptions.length === 0) {
+    redList.innerHTML = `<div class="empty-state">No rewards redeemed yet. Earn Gold by completing tasks &amp; Bosses!</div>`;
+  } else {
+    redList.innerHTML = state.redemptions
+      .slice(0, 20)
+      .map(
+        r => `
+        <div class="skill-item-wrap" style="padding:8px 12px;">
+          <div class="skill-top-row">
+            <span style="font-weight:800;font-size:13px;color:var(--text-bright);">${escapeHtml(r.name)}</span>
+            <span style="font-family:monospace;font-size:12px;color:var(--accent-gold);font-weight:800;">−${r.cost} G · ${formatRelDate(r.timestamp)}</span>
+          </div>
+        </div>
+      `
+      )
+      .join('');
+  }
 }

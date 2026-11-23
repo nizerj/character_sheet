@@ -1,9 +1,21 @@
 {
-  "name": "Astral Life Sheet — Real-Life RPG",
+  "name": "Life Sheet — Real-Life RPG",
   "short_name": "Life Sheet",
-  "description": "Real-life gamification character sheet with 5-axis ability radar, lunar/star skills, difficulty XP, and rank decay.",
+  "description": "Real-life gamification character sheet with 5-axis ability radar, skills, recurring tasks, bosses, shop, and Health Connect.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#090818",
-  "theme_color": "#161238"
+  "theme_color": "#161238",
+  "icons": [
+    {
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }

@@ -4,4 +4,6 @@
     <string name="title_activity_main">Life Sheet</string>
     <string name="package_name">com.lifesheet.app</string>
     <string name="custom_url_scheme">com.lifesheet.app</string>
+    <string name="shortcut_new_task">New Task</string>
+    <string name="shortcut_focus">Focus Timer</string>
 </resources>
